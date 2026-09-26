@@ -4,50 +4,48 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Word of the day</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@200;400&family=Roboto:wght@200;300;400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400&family=Roboto:wght@200;300;400&display=swap" rel="stylesheet">
 <style>
   html,body{margin:0;padding:0;height:100%;background:#131F25;overflow:hidden;}
   body{
     font-family:'Roboto','Noto Sans SC',system-ui,sans-serif;
     color:#EAF1F0;
-    display:flex;flex-direction:column;justify-content:center;
-    padding:3.5vh 4vw;box-sizing:border-box;
+    display:flex;flex-direction:column;justify-content:center;gap:1.2vh;
+    padding:2vh 2.4vw;box-sizing:border-box;
   }
   .label{
     color:#EFA457;text-transform:uppercase;
     letter-spacing:0.18em;font-weight:400;
-    font-size:clamp(10px,2.3vh,18px);
-    margin-bottom:2.4vh;
+    font-size:clamp(9px,7vh,15px);
   }
+  .row{display:flex;align-items:baseline;gap:1.6vw;flex-wrap:wrap;}
   .en{
     font-weight:200;line-height:1;
-    font-size:clamp(24px,11vh,84px);
-    letter-spacing:-0.02em;
-    margin-bottom:2.2vh;
+    font-size:clamp(20px,20vh,40px);
+    letter-spacing:-0.01em;
   }
-  .langs{display:flex;align-items:baseline;gap:2.2vw;flex-wrap:wrap;margin-bottom:2.6vh;}
   .zh{
     font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;
-    font-weight:400;line-height:1;
-    font-size:clamp(18px,6.5vh,52px);
+    font-weight:300;line-height:1;
+    font-size:clamp(16px,15vh,30px);
   }
-  .py{color:#EFA457;font-size:clamp(11px,3vh,24px);font-weight:300;margin-left:-1.4vw;}
-  .es{color:#B8CBCF;font-size:clamp(12px,4vh,32px);font-weight:300;}
+  .py{color:#EFA457;font-size:clamp(10px,8vh,17px);font-weight:300;margin-left:-1.1vw;}
+  .es{color:#B8CBCF;font-size:clamp(11px,9vh,19px);font-weight:300;}
   .def{
-    font-size:clamp(11px,3.2vh,26px);font-weight:300;line-height:1.35;
-    color:#EAF1F0;margin-bottom:1.6vh;
+    font-size:clamp(10px,8vh,17px);font-weight:300;line-height:1.3;
+    color:#EAF1F0;
   }
   .sent{
-    font-size:clamp(11px,3vh,24px);font-weight:300;line-height:1.35;
+    font-size:clamp(10px,7.5vh,16px);font-weight:300;line-height:1.3;
     color:#8FAAB0;font-style:italic;
-    border-left:2px solid rgba(239,164,87,0.5);padding-left:1.4vw;
+    border-left:2px solid rgba(239,164,87,0.5);padding-left:0.9vw;
   }
 </style>
 </head>
 <body>
   <div class="label">Word of the day</div>
-  <div class="en" id="en"></div>
-  <div class="langs">
+  <div class="row">
+    <span class="en" id="en"></span>
     <span class="zh" id="zh"></span><span class="py" id="py"></span>
     <span class="es" id="es"></span>
   </div>
