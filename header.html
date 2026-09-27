@@ -10,10 +10,10 @@
   html,body{margin:0;padding:0;width:100%;height:100%;background:var(--bg);overflow:hidden;}
   body{font-family:'Roboto',system-ui,sans-serif;color:var(--ink);box-sizing:border-box;
        display:flex;flex-direction:column;justify-content:center;gap:7vh;padding:3vh 2vw;}
-  .counts{display:flex;align-items:stretch;gap:3vw;min-width:0;}
-  .count{display:flex;align-items:baseline;gap:1.4vw;min-width:0;}
-  .count + .count{padding-left:3vw;border-left:1px solid var(--rule);}
-  .num{color:var(--amber);font-weight:200;font-size:40vh;line-height:.9;}
+  .counts{display:flex;align-items:stretch;gap:2vw;min-width:0;}
+  .count{display:flex;align-items:baseline;gap:1.2vw;min-width:0;flex:1 1 0;}
+  .count + .count{padding-left:2vw;border-left:1px solid var(--rule);}
+  .num{color:var(--amber);font-weight:200;font-size:36vh;line-height:.9;}
   .what{display:flex;flex-direction:column;min-width:0;}
   .unit{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:11vh;line-height:1.2;}
   .title{font-weight:300;font-size:18vh;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -75,7 +75,21 @@ function renderCounts() {
     return `<div class="count">${num === "" ? "" : `<span class="num">${num}</span>`}
       <span class="what"><span class="unit">${unit}</span><span class="title"></span></span></div>`;
   }).join("");
-  document.querySelectorAll(".title").forEach((el, i) => el.textContent = show[i].title);
+  document.querySelectorAll(".title").forEach((el, i) => {
+    el.textContent = shortTitle(show[i].title);
+    // Shrink long names until they fit instead of cutting them off.
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    const min = size * 0.55;
+    while (el.scrollWidth > el.clientWidth && size > min) { size *= 0.94; el.style.fontSize = size + "px"; }
+  });
+}
+
+// "Sean Kramer's Birthday" -> "Sean's birthday", "Aiden's Birthday Party" -> "Aiden's party"
+function shortTitle(t) {
+  if (!/birthday/i.test(t)) return t;
+  const first = t.trim().split(/\s+/)[0].replace(/['’]s$/i, "");
+  if (/^birthday/i.test(first)) return t;
+  return `${first}'s ${/party/i.test(t) ? "party" : "birthday"}`;
 }
 
 // Sunset — standard sunrise equation (accurate to a minute or two).
