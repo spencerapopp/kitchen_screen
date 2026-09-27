@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Word of the day</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400&family=Roboto:ital,wght@0,200;0,300;0,400;1,300&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#13242A; --ink:#EAF1F0; --muted:#8FAAB0; --soft:#B8CBCF;
+    --amber:#EFA457; --rule:rgba(160,205,210,0.18);
+  }
+  html,body{margin:0;padding:0;width:100%;height:100%;background:var(--bg);overflow:hidden;}
+  body{font-family:'Roboto','Noto Sans SC',system-ui,sans-serif;color:var(--ink);}
+  .slide{position:absolute;inset:0;box-sizing:border-box;padding:7vh 5vw;
+         opacity:0;transition:opacity 1.2s ease;}
+  .slide.on{opacity:1;}
+  .label{color:var(--amber);text-transform:uppercase;letter-spacing:.2em;font-weight:400;
+         font-size:6.2vh;line-height:1;white-space:nowrap;}
+
+  /* word slide: word on the left, meaning on the right */
+  #word{display:grid;grid-template-columns:44% 1fr;}
+  .left{display:flex;flex-direction:column;justify-content:center;min-width:0;padding-right:4vw;}
+  .right{display:flex;flex-direction:column;justify-content:center;gap:5vh;min-width:0;
+         padding-left:4vw;border-left:1px solid var(--rule);margin:4vh 0;overflow:hidden;}
+  .en{font-weight:200;line-height:1;letter-spacing:-.02em;white-space:nowrap;margin:4vh 0 3.5vh;}
+  .zhrow{display:flex;align-items:baseline;gap:2.2vw;white-space:nowrap;margin-bottom:2.5vh;}
+  .zh{font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;font-weight:400;line-height:1;}
+  .py{color:var(--amber);font-weight:300;}
+  .es{color:var(--soft);font-weight:300;white-space:nowrap;}
+  .def{font-weight:300;line-height:1.3;}
+  .sent{font-weight:300;font-style:italic;line-height:1.3;color:var(--muted);
+        padding-left:1.6vw;border-left:2px solid rgba(239,164,87,.55);}
+
+  /* quote slide */
+  #quote{display:flex;flex-direction:column;justify-content:center;gap:5vh;}
+  .qtext{font-weight:300;font-style:italic;line-height:1.25;overflow:hidden;}
+  .qtext::before{content:"\201C";color:var(--amber);font-style:normal;margin-right:.08em;}
+  .qtext::after{content:"\201D";color:var(--amber);font-style:normal;margin-left:.04em;}
+  .qby{color:var(--muted);font-size:6.5vh;letter-spacing:.06em;}
+</style>
+</head>
+<body>
+  <div class="slide on" id="word">
+    <div class="left">
+      <div class="label" id="wlabel">Word of the day</div>
+      <div class="en" id="en"></div>
+      <div class="zhrow"><span class="zh" id="zh"></span><span class="py" id="py"></span></div>
+      <div class="es" id="es"></div>
+    </div>
+    <div class="right" id="right">
+      <div class="def" id="def"></div>
+      <div class="sent" id="sent"></div>
+    </div>
+  </div>
+
+  <div class="slide" id="quote">
+    <div class="label">Olivia says</div>
+    <div class="qtext" id="qtext"></div>
+    <div class="qby" id="qby"></div>
+  </div>
+
+<script src="words.js"></script>
+<script src="quotes.js"></script>
+<script>
+// ── settings ──
+const WORD_SECONDS = 45, QUOTE_SECONDS = 15;
+const EVENTS_URL = "https://raw.githubusercontent.com/spencerapopp/kitchen_screen/main/events.json";
+
+// Test hooks: card.html?date=2026-10-31&act=swim&slide=quote
+const params = new URLSearchParams(location.search);
+const today = () => {
+  if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); return new Date(y, m-1, d); }
+  return new Date();
+};
+const isoOf = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+let activities = params.get("act") ? params.get("act").split(",") : [];
+
+// Shrink a font until the element (or its box) stops overflowing.
+function fit(el, maxVh, minVh, box) {
+  box = box || el;
+  const vh = innerHeight / 100;
+  let size = maxVh;
+  el.style.fontSize = (size * vh) + "px";
+  while (size > minVh && (box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1)) {
+    size -= 0.5;
+    el.style.fontSize = (size * vh) + "px";
+  }
+}
+
+function renderWord() {
+  const pick = WOTD.pick(today(), activities);
+  const [en, zh, py, es, def, sent] = pick.word;
+  document.getElementById("wlabel").textContent = pick.label;
+  const set = (id, t) => document.getElementById(id).textContent = t;
+  set("en", en); set("zh", zh); set("py", py); set("es", es); set("def", def); set("sent", sent);
+
+  const left = document.querySelector(".left");
+  const leftW = left.clientWidth - parseFloat(getComputedStyle(left).paddingRight);
+  const oneLine = (id, max, min) => {
+    const el = document.getElementById(id);
+    let size = max; const vh = innerHeight / 100;
+    el.style.fontSize = size * vh + "px";
+    while (size > min && el.scrollWidth > leftW) { size -= 0.5; el.style.fontSize = size * vh + "px"; }
+  };
+  oneLine("en", 25, 9);
+  // Characters and pinyin share one line — shrink them together.
+  const zhEl = document.getElementById("zh"), pyEl = document.getElementById("py"), row = document.querySelector(".zhrow");
+  let z = 17; const vh0 = innerHeight / 100;
+  do { zhEl.style.fontSize = z * vh0 + "px"; pyEl.style.fontSize = z * 0.5 * vh0 + "px"; z -= 0.5; }
+  while (z > 6 && row.scrollWidth > leftW);
+  oneLine("es", 10, 5);
+  // Definition and sentence share the right column; shrink both together until they fit.
+  const right = document.getElementById("right"), d = document.getElementById("def"), s = document.getElementById("sent");
+  let size = 10.5; const vh = innerHeight / 100;
+  do { d.style.fontSize = size * vh + "px"; s.style.fontSize = size * 0.88 * vh + "px"; size -= 0.25; }
+  while (size > 4 && right.scrollHeight > right.clientHeight + 1);
+}
+
+function renderQuote() {
+  const list = OLIVIA_SAYS.quotes;
+  const t = today();
+  const dayNumber = Math.floor(new Date(t.getFullYear(), t.getMonth(), t.getDate()) / 86400000);
+  document.getElementById("qtext").textContent = list[dayNumber % list.length].replace(/^"|"$/g, "");
+  document.getElementById("qby").textContent = "— " + OLIVIA_SAYS.name;
+  const q = document.getElementById("qtext");
+  q.style.maxHeight = (innerHeight * 0.52) + "px";
+  fit(q, 15, 5);
+}
+
+function render() { renderWord(); renderQuote(); }
+
+// Calendar feed: today's activities (swim, soccer...) pick a themed word. Ignored if stale.
+async function loadEvents() {
+  if (params.get("act")) return;
+  try {
+    const r = await fetch(EVENTS_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const next = data.asOf === isoOf(new Date()) ? (data.today || []) : [];
+    if (next.join() !== activities.join()) { activities = next; renderWord(); }
+  } catch (e) { /* no feed yet — the day's own word is used */ }
+}
+
+// Rotation
+let showing = "word";
+function cycle() {
+  const next = showing === "word" ? "quote" : "word";
+  document.getElementById(showing).classList.remove("on");
+  document.getElementById(next).classList.add("on");
+  showing = next;
+  setTimeout(cycle, (next === "word" ? WORD_SECONDS : QUOTE_SECONDS) * 1000);
+}
+
+document.fonts.ready.then(() => {
+  render();
+  if (params.get("slide") === "quote") { document.getElementById("word").classList.remove("on"); document.getElementById("quote").classList.add("on"); }
+  else if (!params.get("slide")) setTimeout(cycle, WORD_SECONDS * 1000);
+});
+loadEvents();
+setInterval(loadEvents, 30 * 60 * 1000);
+let lastDay = isoOf(new Date());
+setInterval(() => { const d = isoOf(new Date()); if (d !== lastDay) { lastDay = d; activities = []; render(); loadEvents(); } }, 60 * 1000);
+addEventListener("resize", render);
+setTimeout(() => location.reload(), 6 * 60 * 60 * 1000);   // pick up new words/code a few times a day
+</script>
+</body>
+</html>
