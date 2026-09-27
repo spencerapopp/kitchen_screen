@@ -12,9 +12,7 @@
   }
   html,body{margin:0;padding:0;width:100%;height:100%;background:var(--bg);overflow:hidden;}
   body{font-family:'Roboto','Noto Sans SC',system-ui,sans-serif;color:var(--ink);}
-  .slide{position:absolute;inset:0;box-sizing:border-box;padding:7vh 5vw;
-         opacity:0;transition:opacity 1.2s ease;}
-  .slide.on{opacity:1;}
+  .slide{position:absolute;inset:0;box-sizing:border-box;padding:7vh 5vw;}
   .label{color:var(--amber);text-transform:uppercase;letter-spacing:.2em;font-weight:400;
          font-size:6.2vh;line-height:1;white-space:nowrap;}
 
@@ -32,16 +30,10 @@
   .sent{font-weight:300;font-style:italic;line-height:1.3;color:var(--muted);
         padding-left:1.6vw;border-left:2px solid rgba(239,164,87,.55);}
 
-  /* quote slide */
-  #quote{display:flex;flex-direction:column;justify-content:center;gap:5vh;}
-  .qtext{font-weight:300;font-style:italic;line-height:1.25;overflow:hidden;}
-  .qtext::before{content:"\201C";color:var(--amber);font-style:normal;margin-right:.08em;}
-  .qtext::after{content:"\201D";color:var(--amber);font-style:normal;margin-left:.04em;}
-  .qby{color:var(--muted);font-size:6.5vh;letter-spacing:.06em;}
 </style>
 </head>
 <body>
-  <div class="slide on" id="word">
+  <div class="slide" id="word">
     <div class="left">
       <div class="label" id="wlabel">Word of the day</div>
       <div class="en" id="en"></div>
@@ -54,20 +46,13 @@
     </div>
   </div>
 
-  <div class="slide" id="quote">
-    <div class="label">Olivia says</div>
-    <div class="qtext" id="qtext"></div>
-    <div class="qby" id="qby"></div>
-  </div>
 
 <script src="words.js"></script>
-<script src="quotes.js"></script>
 <script>
 // ── settings ──
-const WORD_SECONDS = 45, QUOTE_SECONDS = 15;
 const EVENTS_URL = "https://raw.githubusercontent.com/spencerapopp/kitchen_screen/main/events.json";
 
-// Test hooks: card.html?date=2026-10-31&act=swim&slide=quote
+// Test hooks: card.html?date=2026-10-31&act=swim
 const params = new URLSearchParams(location.search);
 const today = () => {
   if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); return new Date(y, m-1, d); }
@@ -76,17 +61,6 @@ const today = () => {
 const isoOf = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 let activities = params.get("act") ? params.get("act").split(",") : [];
 
-// Shrink a font until the element (or its box) stops overflowing.
-function fit(el, maxVh, minVh, box) {
-  box = box || el;
-  const vh = innerHeight / 100;
-  let size = maxVh;
-  el.style.fontSize = (size * vh) + "px";
-  while (size > minVh && (box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1)) {
-    size -= 0.5;
-    el.style.fontSize = (size * vh) + "px";
-  }
-}
 
 function renderWord() {
   const pick = WOTD.pick(today(), activities);
@@ -117,18 +91,7 @@ function renderWord() {
   while (size > 4 && right.scrollHeight > right.clientHeight + 1);
 }
 
-function renderQuote() {
-  const list = OLIVIA_SAYS.quotes;
-  const t = today();
-  const dayNumber = Math.floor(new Date(t.getFullYear(), t.getMonth(), t.getDate()) / 86400000);
-  document.getElementById("qtext").textContent = list[dayNumber % list.length].replace(/^"|"$/g, "");
-  document.getElementById("qby").textContent = "— " + OLIVIA_SAYS.name;
-  const q = document.getElementById("qtext");
-  q.style.maxHeight = (innerHeight * 0.52) + "px";
-  fit(q, 15, 5);
-}
-
-function render() { renderWord(); renderQuote(); }
+function render() { renderWord(); }
 
 // Calendar feed: today's activities (swim, soccer...) pick a themed word. Ignored if stale.
 async function loadEvents() {
@@ -142,21 +105,9 @@ async function loadEvents() {
   } catch (e) { /* no feed yet — the day's own word is used */ }
 }
 
-// Rotation
-let showing = "word";
-function cycle() {
-  const next = showing === "word" ? "quote" : "word";
-  document.getElementById(showing).classList.remove("on");
-  document.getElementById(next).classList.add("on");
-  showing = next;
-  setTimeout(cycle, (next === "word" ? WORD_SECONDS : QUOTE_SECONDS) * 1000);
-}
 
-document.fonts.ready.then(() => {
-  render();
-  if (params.get("slide") === "quote") { document.getElementById("word").classList.remove("on"); document.getElementById("quote").classList.add("on"); }
-  else if (!params.get("slide")) setTimeout(cycle, WORD_SECONDS * 1000);
-});
+document.fonts.ready.then(render);
+render();
 loadEvents();
 setInterval(loadEvents, 30 * 60 * 1000);
 let lastDay = isoOf(new Date());

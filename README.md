@@ -4,8 +4,8 @@ Pages shown inside the DAKboard kitchen display.
 
 | Page | Where it shows | What it does |
 |---|---|---|
-| `card.html` | Bottom-right panel | Word of the day for 45 seconds, then one of Olivia's quotes for 15 seconds |
-| `header.html` | Top strip, between the clock and the weather | Next two countdowns, today's sunset, tonight's moon |
+| `card.html` | Bottom-right panel | Word of the day (changes at midnight) |
+| `quote.html` | Caption along the bottom of the photo | One of Olivia's quotes (changes at midnight) |
 
 ## Everyday edits
 
@@ -22,14 +22,9 @@ The TV reloads these pages every few hours, so changes show up the same day.
 `ICAL_URLS` secret (Settings → Secrets and variables → Actions; one secret iCal address per line)
 and writes `events.json`.
 
-This repo is public, so only two things are published:
-
-- keywords for today's activities (`swim`, `soccer`, …), with no titles or times
-- the title and date of upcoming events whose title contains **birthday** or **#countdown**
-
-To count down to anything else, add `#countdown` to the event title in Google Calendar.
+This repo is public, so the only thing published is keywords for today's activities
+(`swim`, `soccer`, …) — no titles, names, or times. The word card uses them to pick a themed word.
 
 ## Test a date
 
-`card.html?date=2026-10-31&slide=word`, `card.html?date=2026-09-29&act=swim`, `card.html?slide=quote`,
-`header.html?date=2026-12-20`
+`card.html?date=2026-10-31`, `card.html?act=swim`, `quote.html?n=5`, `quote.html?solid`

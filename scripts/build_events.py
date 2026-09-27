@@ -6,12 +6,10 @@ output is kept deliberately small:
 
   - "today":      activity keywords found in today's events (e.g. "swim", "soccer").
                   No titles, times, or places.
-  - "countdowns": title and date of upcoming events whose title contains "birthday"
-                  or the tag "#countdown" (the tag is removed). Nothing else is published.
+Nothing else is published.
 """
 import json
 import os
-import re
 import sys
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -21,8 +19,6 @@ import icalendar
 import recurring_ical_events
 
 TZ = ZoneInfo("America/Chicago")
-LOOKAHEAD_DAYS = 120
-MAX_COUNTDOWNS = 8
 
 # Keyword in an event title -> activity the word of the day can theme on.
 ACTIVITIES = {
@@ -61,8 +57,7 @@ def main() -> int:
         return 0
 
     today = datetime.now(TZ).date()
-    end = today + timedelta(days=LOOKAHEAD_DAYS)
-    todays, counts, failures = set(), {}, 0
+    todays, failures = set(), 0
 
     for n, url in enumerate(urls, 1):
         try:
@@ -71,19 +66,13 @@ def main() -> int:
             failures += 1
             print(f"calendar {n}: could not be read ({type(e).__name__})")
             continue
-        events = recurring_ical_events.of(cal).between(today, end + timedelta(days=1))
+        events = recurring_ical_events.of(cal).between(today, today + timedelta(days=1))
         for ev in events:
-            title = str(ev.get("SUMMARY", "")).strip()
-            low = title.lower()
-            day = start_date(ev)
-            if day == today:
+            low = str(ev.get("SUMMARY", "")).lower()
+            if start_date(ev) == today:
                 for key, act in ACTIVITIES.items():
                     if key in low:
                         todays.add(act)
-            if "birthday" in low or "#countdown" in low:
-                clean = re.sub(r"\s*#countdown\b", "", title, flags=re.I).strip()
-                if clean and today <= day <= end:
-                    counts.setdefault((day, clean), None)
         print(f"calendar {n}: read OK")
 
     if failures == len(urls):
@@ -93,13 +82,12 @@ def main() -> int:
     out = {
         "asOf": today.isoformat(),
         "today": [a for a in ORDER if a in todays],
-        "countdowns": [{"title": t, "date": d.isoformat()} for d, t in sorted(counts)][:MAX_COUNTDOWNS],
     }
     path = os.path.join(os.path.dirname(__file__), "..", "events.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"today={out['today']} countdowns={len(out['countdowns'])}")
+    print(f"today={out['today']}")
     return 0
 
 
