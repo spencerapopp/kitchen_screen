@@ -1,26 +1,4 @@
 {
   "asOf": "2026-09-27",
-  "today": [],
-  "countdowns": [
-    {
-      "title": "Sean Kramer's Birthday",
-      "date": "2026-10-08"
-    },
-    {
-      "title": "Aiden's Birthday Party",
-      "date": "2026-10-11"
-    },
-    {
-      "title": "Andrew's Birthday",
-      "date": "2026-10-21"
-    },
-    {
-      "title": "Rohan Sarode's Birthday",
-      "date": "2026-12-17"
-    },
-    {
-      "title": "Spencer's Birthday",
-      "date": "2027-01-05"
-    }
-  ]
+  "today": []
 }
