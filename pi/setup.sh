@@ -37,11 +37,10 @@ if [ ! -f "$CONF" ]; then
   "home_address": "",
   "tomtom_key": "",
   "leave_buffer_min": 5,
-  "leave_titles": ["Pre-K Dropoff", "Work"],
+  "leave_titles": ["Pre-K Dropoff"],
   "arrive_early": {"Pre-K Dropoff": 5},
   "places": {
-    "Custer Parkway Preschool II": "2129 Teakwood Ln, Plano, TX 75075",
-    "9797 Rombauer Rd": "9797 Rombauer Rd, Dallas, TX 75019"
+    "Custer Parkway Preschool II": "2129 Teakwood Ln, Plano, TX 75075"
   },
   "photos_folder_id": "1qkg2u_GU_Qlrz5jlsbEaANxPN0MUJORg"
 }
