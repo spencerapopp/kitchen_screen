@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kitchen</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+  /* Bay palette — dark, low-glare, one cool accent + one warm accent */
+  :root{
+    --page:#0E1A22; --panel:rgba(138,180,248,0.05); --panel-line:rgba(138,180,248,0.12);
+    --cell:rgba(138,180,248,0.045); --ink:#E8EEF3; --muted:#93A7B5; --dim:#6F8494;
+    --bay:#8AB4F8; --peach:#F2B98A; --peach-ink:#F7DCC4;
+  }
+  html,body{margin:0;height:100%;background:var(--page);overflow:hidden;cursor:none;}
+  /* Everything is laid out on a fixed 1920x1080 canvas, then scaled to the screen. */
+  #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;
+         font-family:Roboto,"Noto Sans",system-ui,sans-serif;color:var(--ink);}
+  .block{position:absolute;box-sizing:border-box;}
+  .panel{background:var(--panel);border:1px solid var(--panel-line);border-radius:20px;overflow:hidden;}
+  .label{color:var(--bay);text-transform:uppercase;letter-spacing:.18em;font-size:17px;font-weight:400;}
+
+  /* clock */
+  #clock{left:48px;top:32px;width:576px;height:108px;}
+  #time{font-size:84px;font-weight:200;line-height:1;letter-spacing:-.01em;}
+  #date{margin-top:10px;color:var(--bay);text-transform:uppercase;letter-spacing:.16em;font-size:21px;}
+
+  /* weather */
+  #weather{left:1094px;top:32px;width:778px;height:108px;display:flex;align-items:center;justify-content:flex-end;gap:28px;}
+  #wnow{display:flex;align-items:center;gap:14px;padding-right:28px;border-right:1px solid var(--panel-line);height:92px;}
+  #wtemp{font-size:78px;font-weight:200;line-height:1;}
+  #wnow svg{width:64px;height:64px;}
+  #wdays{display:flex;gap:10px;}
+  .wday{width:88px;text-align:center;}
+  .wday .d{color:var(--muted);text-transform:uppercase;letter-spacing:.12em;font-size:19px;}
+  .wday svg{width:40px;height:40px;margin:6px 0 4px;}
+  .wday .t{font-size:20px;}
+  .wday .t b{font-weight:400;} .wday .t span{color:var(--dim);margin-left:8px;}
+
+  /* calendar */
+  #cal{left:48px;top:162px;width:1190px;height:886px;padding:14px 16px 16px;display:grid;
+       grid-template-columns:repeat(7,1fr);grid-template-rows:34px repeat(5,1fr);gap:8px;}
+  .dow{color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-size:18px;align-self:end;padding-left:6px;}
+  .dow.today{color:var(--bay);font-weight:500;}
+  .day{background:var(--cell);border-radius:10px;padding:8px 9px 0;overflow:hidden;min-width:0;}
+  .day.past{opacity:.38;}
+  .day.today{background:rgba(138,180,248,0.14);outline:1.5px solid rgba(138,180,248,0.55);}
+  .num{font-size:24px;font-weight:200;line-height:1.1;margin-bottom:2px;}
+  .day.today .num{color:var(--bay);font-weight:400;}
+  .ev{font-size:19px;line-height:1.18;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .day.solo .ev{-webkit-line-clamp:3;}
+  .ev .tm{color:var(--bay);margin-right:5px;}
+  .ev.allday{background:rgba(242,185,138,0.16);border-left:3px solid var(--peach);color:var(--peach-ink);
+             border-radius:4px;padding:2px 6px;margin-left:-3px;margin-right:-3px;}
+  .more{color:var(--dim);font-size:16px;margin-top:4px;}
+
+  /* family list */
+  #todo{left:1277px;top:162px;width:595px;height:184px;padding:18px 22px;}
+  #todo .label{padding-bottom:8px;margin-bottom:12px;border-bottom:1px solid rgba(138,180,248,0.14);}
+  #tasks{column-count:2;column-gap:28px;font-size:19px;}
+  #tasks div{break-inside:avoid;margin-bottom:9px;display:flex;gap:10px;align-items:flex-start;line-height:1.2;}
+  #tasks div::before{content:"";flex:0 0 14px;height:14px;margin-top:3px;border:1.5px solid var(--dim);border-radius:3px;}
+  #tasks .empty{color:var(--dim);}
+  #tasks .empty::before{display:none;}
+
+  /* photo */
+  #photo{left:1277px;top:367px;width:595px;height:421px;}
+  .ph{position:absolute;inset:0;opacity:0;transition:opacity 1.6s ease;}
+  .ph.on{opacity:1;}
+  .ph .bg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(24px) brightness(.55);}
+  .ph .fg{position:absolute;inset:0;background-size:contain;background-position:center;background-repeat:no-repeat;}
+  #quote{position:absolute;left:0;bottom:0;width:100%;height:162px;border:0;background:transparent;}
+
+  /* word of the day */
+  #word{left:1277px;top:810px;width:595px;height:238px;}
+  #word iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
+
+  #status{position:absolute;right:52px;bottom:8px;font-size:13px;color:var(--dim);opacity:.7;}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="block" id="clock"><div id="time"></div><div id="date"></div></div>
+  <div class="block" id="weather"><div id="wnow"></div><div id="wdays"></div></div>
+  <div class="block panel" id="cal"></div>
+  <div class="block panel" id="todo"><div class="label" id="todoTitle">Family list</div><div id="tasks"></div></div>
+  <div class="block panel" id="photo">
+    <div class="ph" id="phA"><div class="bg"></div><div class="fg"></div></div>
+    <div class="ph" id="phB"><div class="bg"></div><div class="fg"></div></div>
+    <iframe id="quote" src="../quote.html" allowtransparency="true"></iframe>
+  </div>
+  <div class="block panel" id="word"><iframe src="../card.html"></iframe></div>
+  <div id="status"></div>
+</div>
+
+<script>
+// ── settings ──
+const LAT = 33.0198, LNG = -96.6989;      // Plano, TX
+const WEEKS = 5;
+const PHOTO_SECONDS = 60;
+const DATA = "/data/";                       // written by server.py on the Pi
+
+// Test hook: dashboard.html?date=2026-10-08
+const params = new URLSearchParams(location.search);
+const now = () => {
+  if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); const t = new Date(); return new Date(y, m-1, d, t.getHours(), t.getMinutes()); }
+  return new Date();
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+async function getJSON(url) { const r = await fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }); if (!r.ok) throw new Error(r.status); return r.json(); }
+
+// ── fit the 1920x1080 canvas to whatever screen this is ──
+function fitStage() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const st = document.getElementById("stage");
+  st.style.transform = `translate(${(innerWidth - 1920 * s) / 2}px, ${(innerHeight - 1080 * s) / 2}px) scale(${s})`;
+}
+addEventListener("resize", fitStage); fitStage();
+
+// ── clock ──
+function renderClock() {
+  const d = now();
+  document.getElementById("time").textContent = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
+  document.getElementById("date").textContent = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+}
+
+// ── weather (Open-Meteo, no account needed) ──
+const ICON = {
+  sun: '<circle cx="12" cy="12" r="4.5" fill="none" stroke="#F2B98A" stroke-width="1.6"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" stroke="#F2B98A" stroke-width="1.6" stroke-linecap="round"/>',
+  part: '<circle cx="9" cy="9" r="3.6" fill="none" stroke="#F2B98A" stroke-width="1.5"/><path d="M9 2.5v1.6M3.5 9H2M4.4 4.4l1.1 1.1M13.6 4.4l-1.1 1.1" stroke="#F2B98A" stroke-width="1.5" stroke-linecap="round"/><path d="M8 20h9.5a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1.2A3 3 0 0 0 8 20z" fill="#0E1A22" stroke="#E8EEF3" stroke-width="1.5"/>',
+  cloud: '<path d="M6.5 19h11a4 4 0 0 0 .4-8 5.8 5.8 0 0 0-11.2 1.4A3.3 3.3 0 0 0 6.5 19z" fill="none" stroke="#E8EEF3" stroke-width="1.5"/>',
+  fog: '<path d="M4 9h16M3 13h18M5 17h14" stroke="#93A7B5" stroke-width="1.6" stroke-linecap="round"/>',
+  rain: '<path d="M6.5 15h11a4 4 0 0 0 .4-8 5.8 5.8 0 0 0-11.2 1.4A3.3 3.3 0 0 0 6.5 15z" fill="none" stroke="#E8EEF3" stroke-width="1.5"/><path d="M8.5 17.5l-1 3M12.5 17.5l-1 3M16.5 17.5l-1 3" stroke="#8AB4F8" stroke-width="1.6" stroke-linecap="round"/>',
+  storm: '<path d="M6.5 14h11a4 4 0 0 0 .4-8 5.8 5.8 0 0 0-11.2 1.4A3.3 3.3 0 0 0 6.5 14z" fill="none" stroke="#E8EEF3" stroke-width="1.5"/><path d="M12.5 14.5l-2.5 4h3l-2 4" fill="none" stroke="#F2B98A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  snow: '<path d="M6.5 14h11a4 4 0 0 0 .4-8 5.8 5.8 0 0 0-11.2 1.4A3.3 3.3 0 0 0 6.5 14z" fill="none" stroke="#E8EEF3" stroke-width="1.5"/><path d="M8 18h.01M12 20h.01M16 18h.01M10 22h.01M14 22h.01" stroke="#E8EEF3" stroke-width="2.4" stroke-linecap="round"/>'
+};
+const iconFor = c => c <= 1 ? "sun" : c <= 2 ? "part" : c === 3 ? "cloud" : c <= 48 ? "fog" : c <= 67 || (c >= 80 && c <= 82) ? "rain" : c <= 77 || c === 85 || c === 86 ? "snow" : "storm";
+const svg = k => `<svg viewBox="0 0 24 24">${ICON[k]}</svg>`;
+
+async function loadWeather() {
+  try {
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LNG}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=America%2FChicago&forecast_days=5`;
+    const w = await getJSON(u);
+    document.getElementById("wnow").innerHTML = `<div id="wtemp">${Math.round(w.current.temperature_2m)}°</div>${svg(iconFor(w.current.weather_code))}`;
+    document.getElementById("wdays").innerHTML = w.daily.time.map((t, i) => {
+      const [y, m, d] = t.split("-").map(Number);
+      const name = i === 0 ? "Today" : new Date(y, m-1, d).toLocaleDateString("en-US", { weekday: "short" });
+      return `<div class="wday"><div class="d">${name}</div>${svg(iconFor(w.daily.weather_code[i]))}<div class="t"><b>${Math.round(w.daily.temperature_2m_max[i])}°</b><span>${Math.round(w.daily.temperature_2m_min[i])}°</span></div></div>`;
+    }).join("");
+  } catch (e) { /* keep the last forecast on screen */ }
+}
+
+// ── calendar ──
+let events = [];
+function fmtTime(d) {
+  const h = d.getHours(), m = d.getMinutes();
+  return (h % 12 || 12) + (m ? ":" + String(m).padStart(2, "0") : "") + (h < 12 ? "a" : "p");
+}
+function renderCalendar() {
+  const today = now(); today.setHours(0, 0, 0, 0);
+  const start = new Date(today); start.setDate(start.getDate() - start.getDay());
+  const byDay = {};
+  for (const ev of events) {
+    if (ev.allDay) {
+      // all-day events cover [start, end) by date
+      const s = new Date(ev.start + "T00:00"), e = new Date((ev.end || ev.start) + "T00:00");
+      if (e <= s) e.setDate(s.getDate() + 1);
+      for (const d = new Date(s); d < e; d.setDate(d.getDate() + 1)) (byDay[ymd(d)] ||= []).push({ ...ev, sort: -1 });
+    } else {
+      const s = new Date(ev.start);
+      (byDay[ymd(s)] ||= []).push({ ...ev, sort: s.getTime(), time: fmtTime(s) });
+    }
+  }
+  let html = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((n, i) => `<div class="dow${i === today.getDay() ? " today" : ""}">${n}</div>`).join("");
+  for (let i = 0; i < WEEKS * 7; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const key = ymd(d);
+    const list = (byDay[key] || []).sort((a, b) => a.sort - b.sort);
+    let cls = d < today ? " past" : d.getTime() === today.getTime() ? " today" : "";
+    const label = d.getDate() === 1 || i === 0 ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : d.getDate();
+    const shown = list.slice(0, 3);
+    if (list.length === 1) cls += " solo";
+    html += `<div class="day${cls}" data-day="${key}"><div class="num">${label}</div>` +
+      shown.map(ev => ev.allDay
+        ? `<div class="ev allday">${esc(ev.title)}</div>`
+        : `<div class="ev"><span class="tm">${ev.time}</span>${esc(ev.title)}</div>`).join("") +
+      `</div>`;
+  }
+  const cal = document.getElementById("cal");
+  cal.innerHTML = html;
+  // Drop events that don't fit and say how many are hidden.
+  cal.querySelectorAll(".day").forEach(cell => {
+    const evs = [...cell.querySelectorAll(".ev")];
+    let hidden = 0;
+    while (evs.length && cell.scrollHeight > cell.clientHeight + 1) { evs.pop().remove(); hidden++; }
+    const total = (byDay[cell.dataset.day] || []).length, extra = total - (evs.length);
+    if (extra > 0) {
+      const m = document.createElement("div"); m.className = "more"; m.textContent = `+${extra} more`; cell.appendChild(m);
+      while (cell.scrollHeight > cell.clientHeight + 1 && evs.length) { evs.pop().remove(); m.textContent = `+${total - evs.length} more`; }
+    }
+  });
+}
+async function loadCalendar() {
+  try { const c = await getJSON(DATA + "calendar.json"); events = c.events || []; setStatus("cal", c.error); } catch (e) { setStatus("cal", "no calendar data"); }
+  renderCalendar();
+}
+
+// ── family list (Google Tasks) ──
+async function loadTasks() {
+  try {
+    const t = await getJSON(DATA + "tasks.json");
+    if (t.title) document.getElementById("todoTitle").textContent = t.title;
+    const items = t.items || [];
+    const box = document.getElementById("tasks");
+    box.innerHTML = items.length ? items.map(x => `<div>${esc(x)}</div>`).join("") : `<div class="empty">All done</div>`;
+    setStatus("tasks", t.error);
+  } catch (e) { setStatus("tasks", "no list data"); }
+}
+
+// ── photos (Google Drive "Kitchen Photos" folder, cached on the Pi) ──
+let photos = [], photoIdx = -1, front = "phA";
+async function loadPhotos() {
+  try { const p = await getJSON(DATA + "photos.json"); photos = p.photos || []; setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
+  if (photoIdx < 0) nextPhoto();
+}
+function nextPhoto() {
+  if (!photos.length) return;
+  photoIdx = (photoIdx + 1 + Math.floor(Math.random() * Math.max(1, photos.length - 1))) % photos.length;
+  const url = DATA + photos[photoIdx];
+  const img = new Image();
+  img.onload = () => {
+    const back = front === "phA" ? "phB" : "phA";
+    const el = document.getElementById(back);
+    el.querySelector(".bg").style.backgroundImage = el.querySelector(".fg").style.backgroundImage = `url("${url}")`;
+    el.classList.add("on"); document.getElementById(front).classList.remove("on"); front = back;
+  };
+  img.src = url;
+}
+
+// ── small, quiet status line (only shows if something is wrong) ──
+const problems = {};
+function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]; document.getElementById("status").textContent = Object.values(problems).join(" · "); }
+
+// ── schedule ──
+renderClock(); setInterval(renderClock, 5000);
+loadWeather(); setInterval(loadWeather, 20 * 60 * 1000);
+loadCalendar(); setInterval(loadCalendar, 5 * 60 * 1000);
+loadTasks(); setInterval(loadTasks, 2 * 60 * 1000);
+loadPhotos(); setInterval(loadPhotos, 30 * 60 * 1000); setInterval(nextPhoto, PHOTO_SECONDS * 1000);
+let lastDay = ymd(new Date());
+setInterval(() => { if (ymd(new Date()) !== lastDay) { lastDay = ymd(new Date()); renderCalendar(); } }, 60 * 1000);
+setTimeout(() => location.reload(), 12 * 60 * 60 * 1000);   // pick up new code twice a day
+</script>
+</body>
+</html>

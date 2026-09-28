@@ -28,3 +28,12 @@ This repo is public, so the only thing published is keywords for today's activit
 ## Test a date
 
 `card.html?date=2026-10-31`, `card.html?act=swim`, `quote.html?n=5`, `quote.html?solid`
+
+## Raspberry Pi version (no DAKboard)
+
+`pi/` runs the whole screen on the Pi: `pi/dashboard.html` (layout), `pi/server.py` (calendar,
+Google Tasks, Drive photos → `~/kitchen-data`), `pi/setup.sh` (one-command install),
+`pi/google_auth.py` (one-time Google sign-in). Private settings stay on the Pi in
+`~/.config/kitchen/config.json`. The Pi pulls this repo nightly at 3:30 AM.
+
+Install on the Pi: `curl -fsSL https://raw.githubusercontent.com/spencerapopp/kitchen_screen/main/pi/setup.sh | bash`
