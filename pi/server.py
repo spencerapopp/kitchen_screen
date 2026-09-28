@@ -17,6 +17,7 @@ Private settings (calendar addresses, Google sign-in) live only on the Pi in
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -92,10 +93,12 @@ def calendar_from_api(cfg):
     cals = json.loads(gget(cfg, "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250")).get("items", [])
     names = [n.lower() for n in (cfg.get("calendar_names") or [])]
     chosen = [c for c in cals if c.get("summary", "").lower() in names] or [c for c in cals if c.get("primary")]
+    # Your own (primary) calendar is also read for hidden "#leave" events, even if it isn't shown.
+    leave_only = [c for c in cals if c.get("primary") and c not in chosen]
     out = []
     t0 = datetime.combine(start, datetime.min.time(), TZ).isoformat()
     t1 = datetime.combine(end, datetime.min.time(), TZ).isoformat()
-    for c in chosen:
+    for c in chosen + leave_only:
         page = ""
         while True:
             url = ("https://www.googleapis.com/calendar/v3/calendars/" + urllib.parse.quote(c["id"]) +
@@ -106,6 +109,8 @@ def calendar_from_api(cfg):
                 if ev.get("status") == "cancelled":
                     continue
                 title = (ev.get("summary") or "(busy)").strip()
+                if c in leave_only and "#leave" not in title.lower():
+                    continue
                 st, en = ev.get("start", {}), ev.get("end", {})
                 if "dateTime" in st:
                     s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
@@ -156,6 +161,11 @@ def update_calendar(cfg):
             return
         _ical["next"] = time.time() + 180                   # the iCal feed: every 3 minutes
         out, errors = calendar_from_ical(cfg)
+    # "#leave" events drive the leave-by banner only; they're never drawn on the calendar.
+    for ev in out:
+        if "#leave" in ev["title"].lower():
+            ev["hidden"] = True
+            ev["title"] = " ".join(w for w in ev["title"].split() if w.lower() != "#leave")
     # Same event on two calendars (e.g. shared family events) → show once.
     seen, unique = set(), []
     for ev in sorted(out, key=lambda x: x["start"]):
@@ -366,6 +376,15 @@ def update_leave(cfg):
     home = geocode(cfg, home_q)
     now = datetime.now(TZ)
     buffer = int(cfg.get("leave_buffer_min", 5))
+    # Hidden trips (school drop-off) are skipped on days marked "No school", "Holiday", "Closed", etc.
+    off_days = set()
+    for ev in _events:
+        if ev.get("allDay") and re.search(r"no school|holiday|school closed|\bclosed\b|\bbreak\b|teacher (work|in-?service)|day off",
+                                          ev["title"], re.I):
+            d0 = date.fromisoformat(ev["start"])
+            d1 = max(date.fromisoformat(ev.get("end") or ev["start"]), d0 + timedelta(days=1))
+            while d0 < d1:
+                off_days.add(d0.isoformat()); d0 += timedelta(days=1)
     trips = []
     for ev in list(_events):
         loc = ev.get("location")
@@ -373,6 +392,8 @@ def update_leave(cfg):
             continue
         start = datetime.fromisoformat(ev["start"])
         if not (now < start <= now + timedelta(hours=LEAVE_WINDOW_H)):
+            continue
+        if ev.get("hidden") and start.date().isoformat() in off_days:
             continue
         dest = geocode(cfg, loc)
         if not (home and dest):

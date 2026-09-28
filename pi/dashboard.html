@@ -182,6 +182,7 @@ function renderCalendar() {
   const start = new Date(today); start.setDate(start.getDate() - start.getDay());
   const byDay = {};
   for (const ev of events) {
+    if (ev.hidden) continue;                       // "#leave" events only power the leave-by banner
     if (ev.allDay) {
       // all-day events cover [start, end) by date
       const s = new Date(ev.start + "T00:00"), e = new Date((ev.end || ev.start) + "T00:00");
