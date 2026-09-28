@@ -75,12 +75,32 @@
   #word{left:1277px;top:810px;width:595px;height:238px;}
   #word iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
 
+  /* top-center banner: severe weather first, otherwise the next "leave by" */
+  #banner{left:520px;top:34px;width:540px;height:104px;display:none;align-items:center;gap:20px;
+          padding:0 26px;border-radius:18px;border:1px solid var(--panel-line);background:var(--panel);}
+  #banner.show{display:flex;}
+  #banner svg{flex:0 0 46px;height:46px;color:var(--ic,var(--bay));}
+  #banner .txt{min-width:0;flex:1;}
+  #banner .small{color:var(--muted);font-size:19px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #banner .big{font-size:36px;font-weight:300;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #banner .big b{font-weight:400;color:var(--bay);}
+  #banner.soon{border-color:rgba(242,185,138,.6);background:rgba(242,185,138,.10);}
+  #banner.soon .big b{color:var(--peach);}
+  #banner.now{border-color:var(--peach);background:rgba(242,185,138,.2);}
+  #banner.now .big b{color:var(--peach);}
+  #banner.watch{border-color:rgba(242,185,138,.7);background:rgba(242,185,138,.12);}
+  #banner.watch .big{color:var(--peach-ink);text-transform:uppercase;letter-spacing:.04em;font-size:30px;font-weight:400;}
+  #banner.warning{border-color:#F28B82;background:rgba(242,139,130,.22);animation:pulse 2.4s ease-in-out infinite;}
+  #banner.warning .big{color:#FFDAD6;text-transform:uppercase;letter-spacing:.04em;font-size:30px;font-weight:500;}
+  @keyframes pulse{50%{background:rgba(242,139,130,.36);}}
+
   #status{position:absolute;right:52px;bottom:8px;font-size:13px;color:var(--dim);opacity:.7;}
 </style>
 </head>
 <body>
 <div id="stage">
   <div class="block" id="clock"><div id="time"></div><div id="date"></div></div>
+  <div class="block" id="banner"></div>
   <div class="block" id="weather"><div id="wnow"></div><div id="wdays"></div></div>
   <div class="block panel" id="cal"></div>
   <div class="block panel" id="todo"><div class="label" id="todoTitle">Family list</div><div id="tasks"></div></div>
@@ -250,8 +270,43 @@ function nextPhoto() {
 const problems = {};
 function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]; document.getElementById("status").textContent = Object.values(problems).join(" · "); }
 
+// ── banner: severe weather, else "leave by" ──
+const CAR = '<svg viewBox="0 0 24 24"><path d="M5 16V11.5l1.7-4.3A2 2 0 0 1 8.6 6h6.8a2 2 0 0 1 1.9 1.2L19 11.5V16M5 16h14M5 16v2M19 16v2M5 11.5h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="13.8" r="1" fill="currentColor"/><circle cx="16" cy="13.8" r="1" fill="currentColor"/></svg>';
+const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+let alerts = [], trips = [];
+const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+function renderBanner() {
+  const b = document.getElementById("banner");
+  const a = alerts[0];
+  if (a) {
+    const until = a.ends ? "until " + clock(new Date(a.ends)) : "";
+    b.className = "block show " + a.level;
+    b.style.setProperty("--ic", a.level === "warning" ? "#F28B82" : "var(--peach)");
+    b.innerHTML = `${WARN}<div class="txt"><div class="big">${esc(a.event)}</div><div class="small">${esc(until)}${alerts.length > 1 ? ` · +${alerts.length - 1} more` : ""}</div></div>`;
+    const big = b.querySelector(".big");            // long names ("Severe Thunderstorm Warning") shrink to fit
+    for (let fs = 30; fs > 18 && big.scrollWidth > big.clientWidth; fs--) big.style.fontSize = fs + "px";
+    return;
+  }
+  const t = new Date();
+  const trip = trips.find(x => new Date(x.start) > t);
+  if (!trip) { b.className = "block"; return; }
+  const leave = new Date(trip.leave), mins = Math.round((leave - t) / 60000);
+  const state = mins <= 0 ? "now" : mins <= 15 ? "soon" : "";
+  const big = mins <= 0 ? "<b>Leave now</b>" : mins <= 15 ? `Leave in <b>${mins} min</b>` : `Leave by <b>${clock(leave)}</b>`;
+  b.className = "block show " + state;
+  b.style.setProperty("--ic", state ? "var(--peach)" : "var(--bay)");
+  b.innerHTML = `${CAR}<div class="txt"><div class="small">${esc(trip.title)} · ${clock(new Date(trip.start))}</div>` +
+    `<div class="big">${big}</div><div class="small">${trip.minutes} min drive${trip.traffic ? " with traffic" : ""}</div></div>`;
+}
+async function loadBanner() {
+  try { alerts = (await getJSON(DATA + "alerts.json")).alerts || []; } catch (e) { alerts = []; }
+  try { trips = (await getJSON(DATA + "leave.json")).trips || []; } catch (e) { trips = []; }
+  renderBanner();
+}
+
 // ── schedule ──
 renderClock(); setInterval(renderClock, 5000);
+loadBanner(); setInterval(loadBanner, 20 * 1000); setInterval(renderBanner, 15 * 1000);
 loadWeather(); setInterval(loadWeather, 20 * 60 * 1000);
 loadCalendar(); setInterval(loadCalendar, 15 * 1000);
 loadTasks(); setInterval(loadTasks, 10 * 1000);

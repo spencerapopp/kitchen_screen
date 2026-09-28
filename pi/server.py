@@ -8,6 +8,8 @@ small data files fresh in ~/kitchen-data (served at /data/):
   tasks.json     open items on your Google Tasks family list   (every 15 seconds)
   photos.json    photos from the Google Drive "Kitchen Photos" folder, converted
                  to JPEG and resized, cached in ~/kitchen-data/photos/  (every 5 minutes)
+  alerts.json    National Weather Service warnings/watches for home (every minute)
+  leave.json     "leave by" times for events with an address in the next 3 hours
 
 Private settings (calendar addresses, Google sign-in) live only on the Pi in
 ~/.config/kitchen/config.json — never in the GitHub repo.
@@ -76,6 +78,7 @@ def http(url, data=None, headers=None, timeout=30):
 # show up within ~30 seconds. Without it, the secret iCal address is used; Google
 # refreshes that feed on its own schedule, so changes can take a while to appear.
 _ical = {"next": 0}
+_events = []          # latest events, shared with the drive-time checker
 
 
 def window():
@@ -106,7 +109,8 @@ def calendar_from_api(cfg):
                 st, en = ev.get("start", {}), ev.get("end", {})
                 if "dateTime" in st:
                     s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
-                    out.append({"title": title, "start": s.isoformat(), "allDay": False})
+                    out.append({"title": title, "start": s.isoformat(), "allDay": False,
+                                "location": (ev.get("location") or "").strip()})
                 elif "date" in st:
                     out.append({"title": title, "start": st["date"], "end": en.get("date") or st["date"], "allDay": True})
             if not r.get("nextPageToken"):
@@ -129,7 +133,8 @@ def calendar_from_ical(cfg):
                 e = ev.get("DTEND").dt if ev.get("DTEND") else None
                 if isinstance(s, datetime):
                     s = s.astimezone(TZ) if s.tzinfo else s.replace(tzinfo=TZ)
-                    out.append({"title": title, "start": s.isoformat(), "allDay": False})
+                    out.append({"title": title, "start": s.isoformat(), "allDay": False,
+                                "location": str(ev.get("LOCATION", "") or "").strip()})
                 else:
                     out.append({"title": title, "start": s.isoformat(),
                                 "end": (e if isinstance(e, date) and not isinstance(e, datetime) else s + timedelta(days=1)).isoformat(),
@@ -160,6 +165,7 @@ def update_calendar(cfg):
             unique.append(ev)
     if errors and not unique:
         return log("calendar failed:", errors)          # keep the last good file
+    _events[:] = unique
     if write_json("calendar.json", {"updated": datetime.now(TZ).isoformat(), "events": unique,
                                     "error": ", ".join(errors) or None}):
         log(f"calendar: {len(unique)} events ({'Google' if has_api else 'iCal'})")
@@ -281,6 +287,111 @@ def update_photos(cfg):
     log(f"photos: {len(keep)} ({added} new)")
 
 
+
+# ── severe weather (National Weather Service, free, no key) ────────────────
+def update_alerts(cfg):
+    lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
+    r = json.loads(http(f"https://api.weather.gov/alerts/active?point={lat},{lng}",
+                        headers={"User-Agent": "kitchen-screen (family dashboard)", "Accept": "application/geo+json"}))
+    out = []
+    for f in r.get("features", []):
+        p = f.get("properties", {})
+        name = p.get("event", "")
+        # Warnings and watches only — advisories (heat, wind) would be on screen all summer.
+        if not (name.endswith("Warning") or name.endswith("Watch") or name.endswith("Emergency")):
+            continue
+        out.append({"event": name, "severity": p.get("severity"),
+                    "level": "warning" if not name.endswith("Watch") else "watch",
+                    "ends": p.get("ends") or p.get("expires"), "headline": p.get("headline")})
+    rank = {"warning": 0, "watch": 1}
+    out.sort(key=lambda a: (rank[a["level"]], a["event"]))
+    if write_json("alerts.json", {"alerts": out}):
+        log("alerts:", [a["event"] for a in out] or "none")
+
+
+# ── "leave by" drive times ─────────────────────────────────────────────────
+# With a free TomTom key (developer.tomtom.com, no credit card) times include live
+# traffic. Without one, OpenStreetMap routing gives typical drive times.
+LEAVE_WINDOW_H = 3
+_geo = {}
+_drive = {}
+
+
+def geocode(cfg, q):
+    if q in _geo:
+        return _geo[q]
+    cache = os.path.join(DATA, "geocache.json")
+    if not _geo and os.path.exists(cache):
+        _geo.update(json.load(open(cache)))
+        if q in _geo:
+            return _geo[q]
+    lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
+    pt = None
+    key = cfg.get("tomtom_key")
+    if key:
+        r = json.loads(http(f"https://api.tomtom.com/search/2/search/{urllib.parse.quote(q)}.json"
+                            f"?key={key}&lat={lat}&lon={lng}&radius=80000&limit=1"))
+        if r.get("results"):
+            p = r["results"][0]["position"]
+            pt = [p["lat"], p["lon"]]
+    else:
+        box = f"{lng-0.8},{lat+0.6},{lng+0.8},{lat-0.6}"          # bias to DFW
+        r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=1&viewbox=" + box +
+                            "&q=" + urllib.parse.quote(q),
+                            headers={"User-Agent": "kitchen-screen (family dashboard)"}))
+        if r:
+            pt = [float(r[0]["lat"]), float(r[0]["lon"])]
+        time.sleep(1.1)                                           # Nominatim: max 1 request/second
+    _geo[q] = pt
+    write_json("geocache.json", dict(_geo))
+    return pt
+
+
+def drive_minutes(cfg, a, b):
+    key = cfg.get("tomtom_key")
+    if key:
+        r = json.loads(http(f"https://api.tomtom.com/routing/1/calculateRoute/{a[0]},{a[1]}:{b[0]},{b[1]}/json"
+                            f"?key={key}&traffic=true&travelMode=car&routeType=fastest"))
+        return round(r["routes"][0]["summary"]["travelTimeInSeconds"] / 60), True
+    r = json.loads(http(f"https://router.project-osrm.org/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=false",
+                        headers={"User-Agent": "kitchen-screen (family dashboard)"}))
+    return round(r["routes"][0]["duration"] / 60 * 1.2), False    # OSRM runs optimistic; pad 20%
+
+
+def update_leave(cfg):
+    home_q = cfg.get("home_address")
+    if not home_q:
+        write_json("leave.json", {"trips": [], "error": None})
+        return
+    home = geocode(cfg, home_q)
+    now = datetime.now(TZ)
+    buffer = int(cfg.get("leave_buffer_min", 5))
+    trips = []
+    for ev in list(_events):
+        loc = ev.get("location")
+        if ev.get("allDay") or not loc:
+            continue
+        start = datetime.fromisoformat(ev["start"])
+        if not (now < start <= now + timedelta(hours=LEAVE_WINDOW_H)):
+            continue
+        dest = geocode(cfg, loc)
+        if not (home and dest):
+            continue
+        k = (loc, start.isoformat())
+        cached = _drive.get(k)
+        if not cached or time.time() - cached[0] > (120 if cfg.get("tomtom_key") else 900):
+            _drive[k] = (time.time(), *drive_minutes(cfg, home, dest))
+        _, mins, live = _drive[k]
+        if mins < 3:                                  # basically next door — no banner
+            continue
+        leave = start - timedelta(minutes=mins + buffer)
+        trips.append({"title": ev["title"], "start": start.isoformat(), "leave": leave.isoformat(),
+                      "minutes": mins, "traffic": live})
+    trips.sort(key=lambda t: t["leave"])
+    if write_json("leave.json", {"trips": trips[:2]}):
+        log("leave:", [(t["title"], t["leave"][11:16]) for t in trips[:2]] or "none")
+
+
 # ── loops ───────────────────────────────────────────────────────────────────
 def every(seconds, fn):
     def run():
@@ -317,6 +428,8 @@ def main():
     every(30, update_calendar)      # Google Calendar: ~30 s; iCal fallback throttles itself to 3 min
     every(15, update_tasks)         # family list: ~15 s
     every(5 * 60, update_photos)    # new photos in the Drive folder: ~5 min
+    every(60, update_alerts)        # severe weather: every minute
+    every(60, update_leave)         # drive times: checked every minute, re-routed every 2 min (TomTom)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=REPO))
     log(f"serving http://localhost:{PORT}/pi/dashboard.html")
     srv.serve_forever()

@@ -34,6 +34,9 @@ if [ ! -f "$CONF" ]; then
   "tasks_list": "",
   "tasks_title": "Family list",
   "calendar_names": ["Family"],
+  "home_address": "",
+  "tomtom_key": "",
+  "leave_buffer_min": 5,
   "photos_folder_id": "1qkg2u_GU_Qlrz5jlsbEaANxPN0MUJORg"
 }
 JSON
@@ -50,6 +53,19 @@ path, urls = sys.argv[1], [u.strip() for u in sys.argv[2:] if u.strip()]
 cfg = json.load(open(path)); cfg["ical_urls"] = urls
 json.dump(cfg, open(path, "w"), indent=2)
 print(f"Saved {len(urls)} calendar(s).")
+PY
+fi
+
+if [ -z "$("$DIR/pi/.venv/bin/python" -c "import json;print(json.load(open('$CONF')).get('home_address',''))")" ]; then
+  echo
+  echo "Home address, for 'leave by' drive times (stays on this Pi). Press Enter to skip:"
+  IFS= read -r HOME_ADDR </dev/tty || true
+  "$DIR/pi/.venv/bin/python" - "$CONF" "$HOME_ADDR" <<'PY'
+import json, sys
+path, addr = sys.argv[1], sys.argv[2].strip()
+cfg = json.load(open(path)); cfg["home_address"] = addr
+cfg.setdefault("tomtom_key", ""); cfg.setdefault("leave_buffer_min", 5)
+json.dump(cfg, open(path, "w"), indent=2)
 PY
 fi
 
