@@ -88,6 +88,11 @@ def window():
     return start, start + timedelta(days=WEEKS * 7 + 1)
 
 
+def is_leave(cfg, title):
+    t = title.lower()
+    return "#leave" in t or any(x.lower() == t.strip() for x in cfg.get("leave_titles") or [])
+
+
 def calendar_from_api(cfg):
     start, end = window()
     cals = json.loads(gget(cfg, "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250")).get("items", [])
@@ -109,7 +114,7 @@ def calendar_from_api(cfg):
                 if ev.get("status") == "cancelled":
                     continue
                 title = (ev.get("summary") or "(busy)").strip()
-                if c in leave_only and "#leave" not in title.lower():
+                if c in leave_only and not is_leave(cfg, title):
                     continue
                 st, en = ev.get("start", {}), ev.get("end", {})
                 if "dateTime" in st:
@@ -161,9 +166,10 @@ def update_calendar(cfg):
             return
         _ical["next"] = time.time() + 180                   # the iCal feed: every 3 minutes
         out, errors = calendar_from_ical(cfg)
-    # "#leave" events drive the leave-by banner only; they're never drawn on the calendar.
+    # "#leave" events (and titles listed in leave_titles) drive the leave-by banner only;
+    # they're never drawn on the calendar.
     for ev in out:
-        if "#leave" in ev["title"].lower():
+        if is_leave(cfg, ev["title"]):
             ev["hidden"] = True
             ev["title"] = " ".join(w for w in ev["title"].split() if w.lower() != "#leave")
     # Same event on two calendars (e.g. shared family events) → show once.
@@ -374,6 +380,7 @@ def update_leave(cfg):
         write_json("leave.json", {"trips": [], "error": None})
         return
     home = geocode(cfg, home_q)
+    places = {k.lower(): v for k, v in (cfg.get("places") or {}).items()}
     now = datetime.now(TZ)
     buffer = int(cfg.get("leave_buffer_min", 5))
     # Hidden trips (school drop-off) are skipped on days marked "No school", "Holiday", "Closed", etc.
@@ -393,9 +400,13 @@ def update_leave(cfg):
         start = datetime.fromisoformat(ev["start"])
         if not (now < start <= now + timedelta(hours=LEAVE_WINDOW_H)):
             continue
-        if ev.get("hidden") and start.date().isoformat() in off_days:
-            continue
-        dest = geocode(cfg, loc)
+        if (start.date().isoformat() in off_days and
+                re.search(r"school|pre-?k|preschool|drop.?off|pick.?up", ev["title"] + " " + loc, re.I)):
+            continue                                   # no drop-off on no-school days
+        early = int((cfg.get("arrive_early") or {}).get(ev["title"], 0))
+        arrive = start - timedelta(minutes=early)
+        places = {k.lower(): v for k, v in (cfg.get("places") or {}).items()}
+        dest = geocode(cfg, places.get(loc.lower(), loc))
         if not (home and dest):
             continue
         k = (loc, start.isoformat())
@@ -405,8 +416,8 @@ def update_leave(cfg):
         _, mins, live = _drive[k]
         if mins < 3:                                  # basically next door — no banner
             continue
-        leave = start - timedelta(minutes=mins + buffer)
-        trips.append({"title": ev["title"], "start": start.isoformat(), "leave": leave.isoformat(),
+        leave = arrive - timedelta(minutes=mins + buffer)
+        trips.append({"title": ev["title"], "start": arrive.isoformat(), "leave": leave.isoformat(),
                       "minutes": mins, "traffic": live})
     trips.sort(key=lambda t: t["leave"])
     if write_json("leave.json", {"trips": trips[:2]}):
