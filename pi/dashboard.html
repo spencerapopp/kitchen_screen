@@ -152,7 +152,7 @@ async function loadWeather() {
 }
 
 // ── calendar ──
-let events = [];
+let events = [], lastEvents = "";
 function fmtTime(d) {
   const h = d.getHours(), m = d.getMinutes();
   return (h % 12 || 12) + (m ? ":" + String(m).padStart(2, "0") : "") + (h < 12 ? "a" : "p");
@@ -202,16 +202,24 @@ function renderCalendar() {
   });
 }
 async function loadCalendar() {
-  try { const c = await getJSON(DATA + "calendar.json"); events = c.events || []; setStatus("cal", c.error); } catch (e) { setStatus("cal", "no calendar data"); }
+  try {
+    const c = await getJSON(DATA + "calendar.json");
+    const next = JSON.stringify(c.events || []);
+    setStatus("cal", c.error);
+    if (next === lastEvents) return;
+    lastEvents = next; events = c.events || [];
+  } catch (e) { setStatus("cal", "no calendar data"); }
   renderCalendar();
 }
 
 // ── family list (Google Tasks) ──
+let lastTasks = null;
 async function loadTasks() {
   try {
     const t = await getJSON(DATA + "tasks.json");
     if (t.title) document.getElementById("todoTitle").textContent = t.title;
     const items = t.items || [];
+    if (JSON.stringify(items) === lastTasks) return; lastTasks = JSON.stringify(items);
     const box = document.getElementById("tasks");
     box.innerHTML = items.length ? items.map(x => `<div>${esc(x)}</div>`).join("") : `<div class="empty">All done</div>`;
     setStatus("tasks", t.error);
@@ -245,9 +253,9 @@ function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]
 // ── schedule ──
 renderClock(); setInterval(renderClock, 5000);
 loadWeather(); setInterval(loadWeather, 20 * 60 * 1000);
-loadCalendar(); setInterval(loadCalendar, 5 * 60 * 1000);
-loadTasks(); setInterval(loadTasks, 2 * 60 * 1000);
-loadPhotos(); setInterval(loadPhotos, 30 * 60 * 1000); setInterval(nextPhoto, PHOTO_SECONDS * 1000);
+loadCalendar(); setInterval(loadCalendar, 15 * 1000);
+loadTasks(); setInterval(loadTasks, 10 * 1000);
+loadPhotos(); setInterval(loadPhotos, 5 * 60 * 1000); setInterval(nextPhoto, PHOTO_SECONDS * 1000);
 let lastDay = ymd(new Date());
 setInterval(() => { if (ymd(new Date()) !== lastDay) { lastDay = ymd(new Date()); renderCalendar(); } }, 60 * 1000);
 setTimeout(() => location.reload(), 12 * 60 * 60 * 1000);   // pick up new code twice a day

@@ -5,7 +5,7 @@ Run on the Pi (with the TV showing the desktop):
     ~/kitchen_screen/pi/.venv/bin/python ~/kitchen_screen/pi/google_auth.py CLIENT_ID CLIENT_SECRET
 
 A browser opens; sign in with the Google account that owns the Family list and
-the Kitchen Photos folder, and allow read-only access. The Pi stores the result
+the Kitchen Photos folder, and allow read-only access (calendar, tasks, Drive). The Pi stores the result
 in ~/.config/kitchen/config.json. Read-only: the dashboard can't change anything.
 """
 import json
@@ -19,7 +19,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 CONFIG = os.path.expanduser("~/.config/kitchen/config.json")
 PORT = 8765
-SCOPES = "https://www.googleapis.com/auth/tasks.readonly https://www.googleapis.com/auth/drive.readonly"
+SCOPES = ("https://www.googleapis.com/auth/tasks.readonly https://www.googleapis.com/auth/drive.readonly "
+          "https://www.googleapis.com/auth/calendar.readonly")
 
 
 def main():
@@ -73,7 +74,8 @@ def main():
     if os.path.exists(CONFIG):
         with open(CONFIG) as f:
             cfg = json.load(f)
-    cfg["google"] = {"client_id": client_id, "client_secret": client_secret, "refresh_token": tok["refresh_token"]}
+    cfg["google"] = {"client_id": client_id, "client_secret": client_secret, "refresh_token": tok["refresh_token"],
+                     "scopes": tok.get("scope", SCOPES)}
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
     os.chmod(CONFIG, 0o600)

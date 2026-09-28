@@ -33,6 +33,7 @@ if [ ! -f "$CONF" ]; then
   "ical_urls": [],
   "tasks_list": "",
   "tasks_title": "Family list",
+  "calendar_names": ["Family"],
   "photos_folder_id": "1qkg2u_GU_Qlrz5jlsbEaANxPN0MUJORg"
 }
 JSON

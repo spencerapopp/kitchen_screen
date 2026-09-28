@@ -4,10 +4,10 @@
 Serves the dashboard at http://localhost:8080/pi/dashboard.html and keeps three
 small data files fresh in ~/kitchen-data (served at /data/):
 
-  calendar.json  events from your secret iCal addresses       (every 5 minutes)
-  tasks.json     open items on your Google Tasks family list   (every 2 minutes)
+  calendar.json  events from Google Calendar                    (every 30 seconds)
+  tasks.json     open items on your Google Tasks family list   (every 15 seconds)
   photos.json    photos from the Google Drive "Kitchen Photos" folder, converted
-                 to JPEG and resized, cached in ~/kitchen-data/photos/  (every 30 minutes)
+                 to JPEG and resized, cached in ~/kitchen-data/photos/  (every 5 minutes)
 
 Private settings (calendar addresses, Google sign-in) live only on the Pi in
 ~/.config/kitchen/config.json — never in the GitHub repo.
@@ -49,11 +49,20 @@ def load_config():
         return {}
 
 
+_last = {}
+
+
 def write_json(name, obj):
+    """Write a data file only when its content changed (spares the SD card)."""
+    key = json.dumps({k: v for k, v in obj.items() if k != "updated"}, sort_keys=True)
+    if _last.get(name) == key and os.path.exists(os.path.join(DATA, name)):
+        return False
+    _last[name] = key
     tmp = os.path.join(DATA, name + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(DATA, name))
+    return True
 
 
 def http(url, data=None, headers=None, timeout=30):
@@ -63,19 +72,55 @@ def http(url, data=None, headers=None, timeout=30):
 
 
 # ── calendar ────────────────────────────────────────────────────────────────
-def update_calendar(cfg):
-    import icalendar
-    import recurring_ical_events
+# With Google connected, events come straight from the Calendar API — changes
+# show up within ~30 seconds. Without it, the secret iCal address is used; Google
+# refreshes that feed on its own schedule, so changes can take a while to appear.
+_ical = {"next": 0}
 
-    urls = cfg.get("ical_urls") or []
-    if not urls:
-        write_json("calendar.json", {"events": [], "error": "no calendars set up"})
-        return
+
+def window():
     today = datetime.now(TZ).date()
     start = today - timedelta(days=(today.weekday() + 1) % 7)       # Sunday of this week
-    end = start + timedelta(days=WEEKS * 7 + 1)
+    return start, start + timedelta(days=WEEKS * 7 + 1)
+
+
+def calendar_from_api(cfg):
+    start, end = window()
+    cals = json.loads(gget(cfg, "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250")).get("items", [])
+    names = [n.lower() for n in (cfg.get("calendar_names") or [])]
+    chosen = [c for c in cals if c.get("summary", "").lower() in names] or [c for c in cals if c.get("primary")]
+    out = []
+    t0 = datetime.combine(start, datetime.min.time(), TZ).isoformat()
+    t1 = datetime.combine(end, datetime.min.time(), TZ).isoformat()
+    for c in chosen:
+        page = ""
+        while True:
+            url = ("https://www.googleapis.com/calendar/v3/calendars/" + urllib.parse.quote(c["id"]) +
+                   "/events?singleEvents=true&orderBy=startTime&maxResults=2500"
+                   "&timeMin=" + urllib.parse.quote(t0) + "&timeMax=" + urllib.parse.quote(t1) + page)
+            r = json.loads(gget(cfg, url))
+            for ev in r.get("items", []):
+                if ev.get("status") == "cancelled":
+                    continue
+                title = (ev.get("summary") or "(busy)").strip()
+                st, en = ev.get("start", {}), ev.get("end", {})
+                if "dateTime" in st:
+                    s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
+                    out.append({"title": title, "start": s.isoformat(), "allDay": False})
+                elif "date" in st:
+                    out.append({"title": title, "start": st["date"], "end": en.get("date") or st["date"], "allDay": True})
+            if not r.get("nextPageToken"):
+                break
+            page = "&pageToken=" + r["nextPageToken"]
+    return out, []
+
+
+def calendar_from_ical(cfg):
+    import icalendar
+    import recurring_ical_events
+    start, end = window()
     out, errors = [], []
-    for n, url in enumerate(urls, 1):
+    for n, url in enumerate(cfg.get("ical_urls") or [], 1):
         try:
             cal = icalendar.Calendar.from_ical(http(url))
             for ev in recurring_ical_events.of(cal).between(start, end):
@@ -91,6 +136,21 @@ def update_calendar(cfg):
                                 "allDay": True})
         except Exception as ex:
             errors.append(f"calendar {n}: {type(ex).__name__}")
+    return out, errors
+
+
+def update_calendar(cfg):
+    has_api = google_token(cfg) and "calendar" in (cfg.get("google") or {}).get("scopes", "")
+    if has_api:
+        out, errors = calendar_from_api(cfg)
+    else:
+        if not cfg.get("ical_urls"):
+            write_json("calendar.json", {"events": [], "error": "no calendars set up"})
+            return
+        if time.time() < _ical["next"]:
+            return
+        _ical["next"] = time.time() + 180                   # the iCal feed: every 3 minutes
+        out, errors = calendar_from_ical(cfg)
     # Same event on two calendars (e.g. shared family events) → show once.
     seen, unique = set(), []
     for ev in sorted(out, key=lambda x: x["start"]):
@@ -100,9 +160,9 @@ def update_calendar(cfg):
             unique.append(ev)
     if errors and not unique:
         return log("calendar failed:", errors)          # keep the last good file
-    write_json("calendar.json", {"updated": datetime.now(TZ).isoformat(), "events": unique,
-                                 "error": ", ".join(errors) or None})
-    log(f"calendar: {len(unique)} events")
+    if write_json("calendar.json", {"updated": datetime.now(TZ).isoformat(), "events": unique,
+                                    "error": ", ".join(errors) or None}):
+        log(f"calendar: {len(unique)} events ({'Google' if has_api else 'iCal'})")
 
 
 # ── Google sign-in (one refresh token, set up once with google_auth.py) ─────
@@ -148,9 +208,9 @@ def update_tasks(cfg):
             break
         page = "&pageToken=" + r["nextPageToken"]
     items.sort(key=lambda t: t.get("position", ""))
-    write_json("tasks.json", {"title": cfg.get("tasks_title") or chosen["title"],
-                              "items": [t["title"].strip() for t in items]})
-    log(f"tasks: {len(items)} open on '{chosen['title']}'")
+    if write_json("tasks.json", {"title": cfg.get("tasks_title") or chosen["title"],
+                                 "items": [t["title"].strip() for t in items]}):
+        log(f"tasks: {len(items)} open on '{chosen['title']}'")
 
 
 # ── photos ──────────────────────────────────────────────────────────────────
@@ -254,9 +314,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     os.makedirs(PHOTOS, exist_ok=True)
-    every(5 * 60, update_calendar)
-    every(2 * 60, update_tasks)
-    every(30 * 60, update_photos)
+    every(30, update_calendar)      # Google Calendar: ~30 s; iCal fallback throttles itself to 3 min
+    every(15, update_tasks)         # family list: ~15 s
+    every(5 * 60, update_photos)    # new photos in the Drive folder: ~5 min
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=REPO))
     log(f"serving http://localhost:{PORT}/pi/dashboard.html")
     srv.serve_forever()
