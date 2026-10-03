@@ -119,7 +119,7 @@ say "Keeping the screen awake"
 sudo raspi-config nonint do_blanking 1 || true
 
 say "Nightly update at 3:30 AM"
-( crontab -l 2>/dev/null | grep -v kitchen_screen ; \
+( crontab -l 2>/dev/null | grep -v kitchen_screen || true ; \
   echo "30 3 * * * git -C $DIR pull -q --ff-only && XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart kitchen.service && pkill -f 'kitchen/chromium' ; true" ) | crontab -
 
 say "Done"
