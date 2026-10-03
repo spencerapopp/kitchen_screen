@@ -108,6 +108,10 @@ EOF
 if [ -d /etc/xdg/labwc ] || command -v labwc >/dev/null; then
   mkdir -p "$HOME/.config/labwc"
   touch "$HOME/.config/labwc/autostart"
+  # A user autostart file replaces the system one, so pull the system one back in (panel, desktop).
+  if [ -f /etc/xdg/labwc/autostart ] && ! grep -q /etc/xdg/labwc/autostart "$HOME/.config/labwc/autostart"; then
+    sed -i '1i . /etc/xdg/labwc/autostart' "$HOME/.config/labwc/autostart"
+  fi
   grep -q kiosk.sh "$HOME/.config/labwc/autostart" || echo "$DIR/pi/kiosk.sh &" >> "$HOME/.config/labwc/autostart"
 fi
 
