@@ -124,5 +124,5 @@ say "Nightly update at 3:30 AM"
 
 say "Done"
 echo "Dashboard: http://localhost:8080/pi/dashboard.html"
-echo "Next: connect Google (family list + photos) — Claude will give you the command."
-echo "Reboot to start full-screen mode:  sudo reboot"
+if grep -q refresh_token "$CONF"; then echo "Google: connected"; else echo "Next: connect Google (family list, photos) with pi/google_auth.py"; fi
+echo "First install? Reboot to start full-screen mode:  sudo reboot"
