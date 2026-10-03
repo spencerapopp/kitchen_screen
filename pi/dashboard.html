@@ -47,9 +47,9 @@
   .day.today{background:rgba(138,180,248,0.14);outline:1.5px solid rgba(138,180,248,0.55);}
   .num{font-size:24px;font-weight:200;line-height:1.1;margin-bottom:2px;}
   .day.today .num{color:var(--bay);font-weight:400;}
-  .ev{font-size:19px;line-height:1.18;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .ev{font-size:19px;line-height:1.18;margin-top:5px;width:100%;box-sizing:border-box;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .day.solo .ev{-webkit-line-clamp:3;}
-  .ev .tm{color:var(--bay);margin-right:5px;}
+  .ev .tm{color:var(--bay);}
   .ev.allday{background:rgba(242,185,138,0.16);border-left:3px solid var(--peach);color:var(--peach-ink);
              border-radius:4px;padding:2px 6px;margin-left:-3px;margin-right:-3px;}
   .more{color:var(--dim);font-size:16px;margin-top:4px;}
@@ -57,8 +57,8 @@
   /* family list */
   #todo{left:1277px;top:162px;width:595px;height:248px;padding:18px 22px;}
   #todo .label{padding-bottom:8px;margin-bottom:12px;border-bottom:1px solid rgba(138,180,248,0.14);}
-  #tasks{column-count:2;column-gap:28px;font-size:19px;}
-  #tasks div{break-inside:avoid;margin-bottom:9px;display:flex;gap:10px;align-items:flex-start;line-height:1.2;}
+  #tasks{column-count:2;column-gap:24px;font-size:18px;}
+  #tasks div{break-inside:avoid;margin-bottom:6px;display:flex;gap:10px;align-items:flex-start;line-height:1.2;}
   #tasks div::before{content:"";flex:0 0 14px;height:14px;margin-top:3px;border:1.5px solid var(--dim);border-radius:3px;}
   #tasks .empty{color:var(--dim);}
   #tasks .empty::before{display:none;}
@@ -205,7 +205,7 @@ function renderCalendar() {
     html += `<div class="day${cls}" data-day="${key}"><div class="num">${label}</div>` +
       shown.map(ev => ev.allDay
         ? `<div class="ev allday">${esc(ev.title)}</div>`
-        : `<div class="ev"><span class="tm">${ev.time}</span>${esc(ev.title)}</div>`).join("") +
+        : `<div class="ev"><span class="tm">${ev.time}</span> ${esc(ev.title)}</div>`).join("") +
       `</div>`;
   }
   const cal = document.getElementById("cal");
@@ -243,6 +243,8 @@ async function loadTasks() {
     if (JSON.stringify(items) === lastTasks) return; lastTasks = JSON.stringify(items);
     const box = document.getElementById("tasks");
     box.innerHTML = items.length ? items.map(x => `<div>${esc(x)}</div>`).join("") : `<div class="empty">All done</div>`;
+    const panel = document.getElementById("todo");
+    for (let fs = 18; fs > 13 && panel.scrollHeight > panel.clientHeight + 1; fs--) box.style.fontSize = fs - 1 + "px";
     setStatus("tasks", t.error);
   } catch (e) { setStatus("tasks", "no list data"); }
 }
