@@ -12,7 +12,7 @@ say() { printf '\n\033[1;34m== %s\033[0m\n' "$*"; }
 
 say "Installing packages"
 sudo apt-get update -qq
-sudo apt-get install -y -qq git python3-venv unclutter fonts-roboto fonts-noto-cjk >/dev/null
+sudo apt-get install -y -qq git python3-venv cron unclutter fonts-roboto fonts-noto-cjk >/dev/null
 CHROME=$(command -v chromium-browser || command -v chromium || true)
 if [ -z "$CHROME" ]; then sudo apt-get install -y -qq chromium >/dev/null || sudo apt-get install -y -qq chromium-browser >/dev/null; fi
 CHROME=$(command -v chromium-browser || command -v chromium)
