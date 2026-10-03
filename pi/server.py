@@ -93,6 +93,21 @@ def is_leave(cfg, title):
     return "#leave" in t or any(x.lower() == t.strip() for x in cfg.get("leave_titles") or [])
 
 
+# Google Calendar's event colours (colorId -> hex), as shown in the Calendar app.
+EVENT_COLORS = {"1": "#7986CB", "2": "#33B679", "3": "#8E24AA", "4": "#E67C73", "5": "#F6BF26", "6": "#F4511E",
+                "7": "#039BE5", "8": "#616161", "9": "#3F51B5", "10": "#0B8043", "11": "#D50000"}
+
+
+# Colour by title when an event has no colour of its own (keyword -> hex). Override with "event_colors" in config.
+KEYWORD_COLORS = {"soccer": "#8E24AA", "swim": "#039BE5", "gymnast": "#E67C73"}
+
+
+def keyword_color(cfg, title):
+    rules = cfg.get("event_colors") or KEYWORD_COLORS
+    t = title.lower()
+    return next((c for k, c in rules.items() if k.lower() in t), None)
+
+
 def calendar_from_api(cfg):
     start, end = window()
     cals = json.loads(gget(cfg, "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250")).get("items", [])
@@ -117,12 +132,15 @@ def calendar_from_api(cfg):
                 if c in leave_only and not is_leave(cfg, title):
                     continue
                 st, en = ev.get("start", {}), ev.get("end", {})
+                # The event's own colour, else None (the screen uses its default look).
+                color = EVENT_COLORS.get(str(ev.get("colorId", ""))) or keyword_color(cfg, title)
                 if "dateTime" in st:
                     s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
                     out.append({"title": title, "start": s.isoformat(), "allDay": False,
-                                "location": (ev.get("location") or "").strip()})
+                                "location": (ev.get("location") or "").strip(), "color": color})
                 elif "date" in st:
-                    out.append({"title": title, "start": st["date"], "end": en.get("date") or st["date"], "allDay": True})
+                    out.append({"title": title, "start": st["date"], "end": en.get("date") or st["date"], "allDay": True,
+                                "color": color})
             if not r.get("nextPageToken"):
                 break
             page = "&pageToken=" + r["nextPageToken"]
@@ -144,7 +162,8 @@ def calendar_from_ical(cfg):
                 if isinstance(s, datetime):
                     s = s.astimezone(TZ) if s.tzinfo else s.replace(tzinfo=TZ)
                     out.append({"title": title, "start": s.isoformat(), "allDay": False,
-                                "location": str(ev.get("LOCATION", "") or "").strip()})
+                                "location": str(ev.get("LOCATION", "") or "").strip(),
+                                "color": keyword_color(cfg, title)})
                 else:
                     out.append({"title": title, "start": s.isoformat(),
                                 "end": (e if isinstance(e, date) and not isinstance(e, datetime) else s + timedelta(days=1)).isoformat(),

@@ -50,6 +50,10 @@
   .ev{font-size:19px;line-height:1.18;margin-top:5px;width:100%;box-sizing:border-box;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .day.solo .ev{-webkit-line-clamp:3;}
   .ev .tm{color:var(--bay);}
+  /* Events coloured in Google Calendar: a stripe and soft tint of that colour, text kept light for reading. */
+  .ev.tinted{border-left:3px solid var(--c);background:color-mix(in srgb, var(--c) 24%, transparent);
+             border-radius:4px;padding:2px 6px;margin-left:-3px;margin-right:-3px;}
+  .ev.tinted .tm{color:color-mix(in srgb, var(--c) 45%, white);}
   .ev.allday{background:rgba(242,185,138,0.16);border-left:3px solid var(--peach);color:var(--peach-ink);
              border-radius:4px;padding:2px 6px;margin-left:-3px;margin-right:-3px;}
   .more{color:var(--dim);font-size:16px;margin-top:4px;}
@@ -177,6 +181,7 @@ function fmtTime(d) {
   const h = d.getHours(), m = d.getMinutes();
   return (h % 12 || 12) + (m ? ":" + String(m).padStart(2, "0") : "") + (h < 12 ? "a" : "p");
 }
+const tint = ev => /^#[0-9A-Fa-f]{6}$/.test(ev.color || "") ? ` style="--c:${ev.color}"` : "";
 function renderCalendar() {
   const today = now(); today.setHours(0, 0, 0, 0);
   const start = new Date(today); start.setDate(start.getDate() - start.getDay());
@@ -204,8 +209,8 @@ function renderCalendar() {
     if (list.length === 1) cls += " solo";
     html += `<div class="day${cls}" data-day="${key}"><div class="num">${label}</div>` +
       shown.map(ev => ev.allDay
-        ? `<div class="ev allday">${esc(ev.title)}</div>`
-        : `<div class="ev"><span class="tm">${ev.time}</span> ${esc(ev.title)}</div>`).join("") +
+        ? `<div class="ev allday${ev.color ? " tinted" : ""}"${tint(ev)}>${esc(ev.title)}</div>`
+        : `<div class="ev${ev.color ? " tinted" : ""}"${tint(ev)}><span class="tm">${ev.time}</span> ${esc(ev.title)}</div>`).join("") +
       `</div>`;
   }
   const cal = document.getElementById("cal");
