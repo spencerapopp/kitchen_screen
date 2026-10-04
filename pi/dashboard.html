@@ -164,8 +164,7 @@ const svg = k => `<svg viewBox="0 0 24 24">${ICON[k]}</svg>`;
 
 async function loadWeather() {
   try {
-    const u = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LNG}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=America%2FChicago&forecast_days=5`;
-    const w = await getJSON(u);
+    const w = await getJSON(DATA + "weather.json");   // fetched by server.py
     document.getElementById("wnow").innerHTML = `<div id="wtemp">${Math.round(w.current.temperature_2m)}°</div>${svg(iconFor(w.current.weather_code))}`;
     document.getElementById("wdays").innerHTML = w.daily.time.map((t, i) => {
       const [y, m, d] = t.split("-").map(Number);
@@ -315,7 +314,7 @@ async function loadBanner() {
 // ── schedule ──
 renderClock(); setInterval(renderClock, 5000);
 loadBanner(); setInterval(loadBanner, 20 * 1000); setInterval(renderBanner, 15 * 1000);
-loadWeather(); setInterval(loadWeather, 20 * 60 * 1000);
+loadWeather(); setInterval(loadWeather, 60 * 1000);
 loadCalendar(); setInterval(loadCalendar, 15 * 1000);
 loadTasks(); setInterval(loadTasks, 10 * 1000);
 loadPhotos(); setInterval(loadPhotos, 5 * 60 * 1000); setInterval(nextPhoto, PHOTO_SECONDS * 1000);

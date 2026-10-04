@@ -323,6 +323,17 @@ def update_photos(cfg):
 
 
 
+# ── weather (Open-Meteo, free, no key) ─────────────────────────────────────
+def update_weather(cfg):
+    lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
+    url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+           "&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min"
+           "&temperature_unit=fahrenheit&timezone=America%%2FChicago&forecast_days=5" % (lat, lng))
+    w = json.loads(http(url))
+    if write_json("weather.json", {"current": w["current"], "daily": w["daily"]}):
+        log("weather:", round(w["current"]["temperature_2m"]), "F")
+
+
 # ── severe weather (National Weather Service, free, no key) ────────────────
 def update_alerts(cfg):
     lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
@@ -479,6 +490,7 @@ def main():
     every(30, update_calendar)      # Google Calendar: ~30 s; iCal fallback throttles itself to 3 min
     every(15, update_tasks)         # family list: ~15 s
     every(5 * 60, update_photos)    # new photos in the Drive folder: ~5 min
+    every(10 * 60, update_weather)  # weather: every 10 minutes
     every(60, update_alerts)        # severe weather: every minute
     every(60, update_leave)         # drive times: checked every minute, re-routed every 2 min (TomTom)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=REPO))
