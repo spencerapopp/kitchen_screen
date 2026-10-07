@@ -10,6 +10,7 @@ small data files fresh in ~/kitchen-data (served at /data/):
                  to JPEG and resized, cached in ~/kitchen-data/photos/  (every 5 minutes)
   alerts.json    National Weather Service warnings/watches for home (every minute)
   leave.json     "leave by" times for events with an address in the next 3 hours
+  commute.json   weekday-morning drive times to the places in config "commute"
 
 Private settings (calendar addresses, Google sign-in) live only on the Pi in
 ~/.config/kitchen/config.json — never in the GitHub repo.
@@ -394,34 +395,52 @@ def geocode(cfg, q):
 
 
 def drive_minutes(cfg, a, b):
+    m, live, _ = drive_route(cfg, a, b)
+    return m, live
+
+
+def drive_route(cfg, a, b):
+    """(minutes now, live traffic?, minutes with no traffic)"""
     key = cfg.get("tomtom_key")
     if key:
         r = json.loads(http(f"https://api.tomtom.com/routing/1/calculateRoute/{a[0]},{a[1]}:{b[0]},{b[1]}/json"
-                            f"?key={key}&traffic=true&travelMode=car&routeType=fastest"))
-        return round(r["routes"][0]["summary"]["travelTimeInSeconds"] / 60), True
+                            f"?key={key}&traffic=true&travelMode=car&routeType=fastest&computeTravelTimeFor=all"))
+        sm = r["routes"][0]["summary"]
+        now_m = round(sm["travelTimeInSeconds"] / 60)
+        free_m = round(sm.get("noTrafficTravelTimeInSeconds", sm["travelTimeInSeconds"]) / 60)
+        return now_m, True, free_m
     r = json.loads(http(f"https://router.project-osrm.org/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=false",
                         headers={"User-Agent": "kitchen-screen (family dashboard)"}))
-    return round(r["routes"][0]["duration"] / 60 * 1.2), False    # OSRM runs optimistic; pad 20%
+    m = round(r["routes"][0]["duration"] / 60 * 1.2)            # OSRM runs optimistic; pad 20%
+    return m, False, m
+
+
+NO_SCHOOL = re.compile(r"no school|holiday|school closed|\bclosed\b|\bbreak\b|teacher (work|in-?service)|day off", re.I)
+
+
+def no_school_days():
+    """Dates covered by all-day 'No school' / 'Break' / 'Holiday' events."""
+    off = set()
+    for ev in _events:
+        if ev.get("allDay") and NO_SCHOOL.search(ev["title"]):
+            d0 = date.fromisoformat(ev["start"])
+            d1 = max(date.fromisoformat(ev.get("end") or ev["start"]), d0 + timedelta(days=1))
+            while d0 < d1:
+                off.add(d0.isoformat()); d0 += timedelta(days=1)
+    return off
 
 
 def update_leave(cfg):
     home_q = cfg.get("home_address")
     if not home_q:
-        write_json("leave.json", {"trips": [], "error": None})
+        write_json("leave.json", {"trips": [], "error": "no home_address in config"})
         return
     home = geocode(cfg, home_q)
     places = {k.lower(): v for k, v in (cfg.get("places") or {}).items()}
     now = datetime.now(TZ)
     buffer = int(cfg.get("leave_buffer_min", 5))
     # Hidden trips (school drop-off) are skipped on days marked "No school", "Holiday", "Closed", etc.
-    off_days = set()
-    for ev in _events:
-        if ev.get("allDay") and re.search(r"no school|holiday|school closed|\bclosed\b|\bbreak\b|teacher (work|in-?service)|day off",
-                                          ev["title"], re.I):
-            d0 = date.fromisoformat(ev["start"])
-            d1 = max(date.fromisoformat(ev.get("end") or ev["start"]), d0 + timedelta(days=1))
-            while d0 < d1:
-                off_days.add(d0.isoformat()); d0 += timedelta(days=1)
+    off_days = no_school_days()
     trips = []
     for ev in list(_events):
         loc = ev.get("location")
@@ -452,6 +471,60 @@ def update_leave(cfg):
     trips.sort(key=lambda t: t["leave"])
     if write_json("leave.json", {"trips": trips[:2]}):
         log("leave:", [(t["title"], t["leave"][11:16]) for t in trips[:2]] or "none")
+
+
+# ── weekday-morning commute ────────────────────────────────────────────────
+# config.json:
+#   "commute": [{"name": "Pre-K", "to": "<address>", "school": true}, {"name": "Work", "to": "<address>"}],
+#   "commute_hours": ["06:30", "09:30"]          (Monday–Friday)
+# "school": true shows "No school" on days the calendar marks as a break/holiday.
+_commute = {}
+
+
+def in_commute_window(cfg, now):
+    if now.weekday() > 4:
+        return False
+    a, b = (cfg.get("commute_hours") or ["06:30", "09:30"])[:2]
+    hm = now.strftime("%H:%M")
+    return a <= hm < b
+
+
+def update_commute(cfg):
+    dests = cfg.get("commute") or []
+    now = datetime.now(TZ)
+    if not dests or not in_commute_window(cfg, now):
+        write_json("commute.json", {"show": False})
+        return
+    home_q = cfg.get("home_address")
+    if not home_q:
+        write_json("commute.json", {"show": False, "error": "no home_address in config"})
+        return
+    home = geocode(cfg, home_q)
+    off = no_school_days() if any(d.get("school") for d in dests) else set()
+    today = now.date().isoformat()
+    live = bool(cfg.get("tomtom_key"))
+    out, err = [], None
+    for d in dests:
+        row = {"name": d.get("name") or d["to"].split(",")[0]}
+        if d.get("school") and today in off:
+            row["off"] = True
+            out.append(row)
+            continue
+        try:
+            dest = geocode(cfg, d["to"])
+            if not (home and dest):
+                raise ValueError("address not found: " + d["to"])
+            k = d["to"]
+            cached = _commute.get(k)
+            if not cached or time.time() - cached[0] > (300 if live else 1800):   # live: every 5 min
+                _commute[k] = (time.time(), *drive_route(cfg, home, dest))
+            _, mins, is_live, free = _commute[k]
+            row.update(minutes=mins, typical=free, delay=max(0, mins - free), live=is_live)
+        except Exception as e:
+            err = str(e)[:120]
+        out.append(row)
+    write_json("commute.json", {"show": True, "live": live, "updated": now.isoformat(timespec="minutes"),
+                                "routes": out, "error": err})
 
 
 # ── loops ───────────────────────────────────────────────────────────────────
@@ -493,6 +566,7 @@ def main():
     every(10 * 60, update_weather)  # weather: every 10 minutes
     every(60, update_alerts)        # severe weather: every minute
     every(60, update_leave)         # drive times: checked every minute, re-routed every 2 min (TomTom)
+    every(60, update_commute)       # weekday-morning commute: re-routed every 5 min (TomTom) / 30 min
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=REPO))
     log(f"serving http://localhost:{PORT}/pi/dashboard.html")
     srv.serve_forever()
