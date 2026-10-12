@@ -23,7 +23,7 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q --ff-only; else git clone -q "
 say "Setting up Python"
 python3 -m venv "$DIR/pi/.venv"
 "$DIR/pi/.venv/bin/pip" install -q --upgrade pip
-"$DIR/pi/.venv/bin/pip" install -q icalendar recurring-ical-events pillow pillow-heif
+"$DIR/pi/.venv/bin/pip" install -q icalendar recurring-ical-events pillow pillow-heif androidtvremote2
 
 say "Settings"
 mkdir -p "$(dirname "$CONF")"
