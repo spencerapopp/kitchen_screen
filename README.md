@@ -9,10 +9,12 @@ Pages shown inside the DAKboard kitchen display.
 
 ## Everyday edits
 
-- **Change a word:** edit its line in `words.js`. Each month lists one word per day, in order.
-- **Add an Olivia quote:** add a line to `quotes.js`.
-- **Holiday words:** `WOTD.MOVING` in `words.js` (Lunar New Year, Mid-Autumn, Thanksgiving, Mother's Day, Father's Day).
-- **Activity words:** `WOTD.ACTIVITY` in `words.js` — used on days the calendar has swim, soccer, basketball, a birthday, the dentist, or the doctor.
+- **Words:** `words.json`. The Pi picks one a day and never repeats a word (log: `~/kitchen-data/wotd_history.json`).
+  Holiday words > activity words (party, swim, soccer, gymnastics, basketball, dentist, doctor) > the day's own word.
+  Add new words to `"extra"`; the screen warns when fewer than 45 new words are left.
+- **Olivia quotes:** from the shared Google Keep note (new quotes first), or `quotes.js` if Keep isn't set up.
+- **Family list:** the shared Google Keep list if set up (`pi/keep_auth.py`), otherwise Google Tasks.
+- **Health check on the Pi:** `python3 ~/kitchen_screen/pi/check.py`
 
 The TV reloads these pages every few hours, so changes show up the same day.
 

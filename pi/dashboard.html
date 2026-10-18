@@ -47,8 +47,9 @@
   .day.today{background:rgba(138,180,248,0.14);outline:1.5px solid rgba(138,180,248,0.55);}
   .num{font-size:24px;font-weight:200;line-height:1.1;margin-bottom:2px;}
   .day.today .num{color:var(--bay);font-weight:400;}
-  /* Event text starts at 19px; busy days shrink it (--fs) until every event fits — nothing is hidden. */
-  .ev{font-size:var(--fs,19px);line-height:1.18;margin-top:5px;width:100%;box-sizing:border-box;display:-webkit-box;-webkit-line-clamp:var(--lines,3);-webkit-box-orient:vertical;overflow:hidden;}
+  /* Event text starts at 19px with the whole title showing; busy days shrink it (--fs) until every
+     event fits. Titles are only cut ("…") as a last resort, below 12px. */
+  .ev{font-size:var(--fs,19px);line-height:1.16;margin-top:5px;width:100%;box-sizing:border-box;display:-webkit-box;-webkit-line-clamp:var(--lines,none);-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
   .day.dense .ev{margin-top:3px;}
   .day.dense .num{font-size:20px;}
   .ev .tm{color:var(--bay);}
@@ -245,19 +246,19 @@ function renderCalendar() {
   }
   const cal = document.getElementById("cal");
   cal.innerHTML = html;
-  // Fit every event in its day (no "+N more"): try 3 lines per event at full size, then smaller text,
-  // then 2 lines, then 1 line, shrinking until it fits.
-  const TRIES = [[3, 19, 15], [2, 19, 14], [1, 19, 11]];          // [lines per event, from px, down to px]
+  // Fit every event in its day with its whole title: shrink the text from 19px down to 11px.
+  // Only if that still doesn't fit, cut titles to 2 lines, then 1 line (the only time "…" appears).
+  const STEPS = [];
+  for (let fs = 19; fs >= 11; fs--) STEPS.push(["none", fs]);
+  STEPS.push([2, 11], [1, 11], [1, 10]);
   cal.querySelectorAll(".day").forEach(cell => {
     if (!cell.querySelector(".ev")) return;
     const over = () => cell.scrollHeight > cell.clientHeight + 1;
-    for (const [lines, hi, lo] of TRIES) {
+    for (const [lines, fs] of STEPS) {
       cell.style.setProperty("--lines", lines);
-      cell.classList.toggle("dense", lines === 1);
-      for (let fs = hi; fs >= lo; fs--) {
-        cell.style.setProperty("--fs", fs + "px");
-        if (!over()) return;
-      }
+      cell.style.setProperty("--fs", fs + "px");
+      cell.classList.toggle("dense", fs <= 14);
+      if (!over()) return;
     }
   });
 }
@@ -358,6 +359,7 @@ async function loadBanner() {
   try { alerts = (await getJSON(DATA + "alerts.json")).alerts || []; } catch (e) { alerts = []; }
   try { trips = (await getJSON(DATA + "leave.json")).trips || []; } catch (e) { trips = []; }
   try { commute = await getJSON(DATA + "commute.json"); setStatus("commute", commute.error); } catch (e) { commute = { show: false }; }
+  try { setStatus("words", (await getJSON(DATA + "word.json")).warning); } catch (e) { /* not picked yet */ }
   renderBanner();
 }
 

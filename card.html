@@ -47,7 +47,6 @@
   </div>
 
 
-<script src="words.js"></script>
 <script>
 // ── settings ──
 const EVENTS_URL = "https://raw.githubusercontent.com/spencerapopp/kitchen_screen/main/events.json";
@@ -60,10 +59,46 @@ const today = () => {
 };
 const isoOf = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 let activities = params.get("act") ? params.get("act").split(",") : [];
+let BANK = null, serverWord = null;
+
+// On the Pi, the server picks the word (and never repeats one): /data/word.json.
+// Anywhere else (test links), pick from words.json the simple way.
+async function loadServerWord() {
+  if (params.get("date") || params.get("act")) return false;
+  try {
+    const r = await fetch("/data/word.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return false;
+    const w = await r.json();
+    if (w.date !== isoOf(new Date())) return false;
+    const changed = JSON.stringify(w) !== JSON.stringify(serverWord);
+    serverWord = w;
+    if (changed) renderWord();
+    return true;
+  } catch (e) { return false; }
+}
+async function loadBank() {
+  const r = await fetch("words.json", { cache: "no-store" });
+  BANK = await r.json();
+}
+function localPick(date, acts) {
+  const y = date.getFullYear(), m = date.getMonth(), d = date.getDate();
+  const iso = isoOf(date), DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const nth = (year, month, wd, n) => 1 + ((wd - new Date(year, month, 1).getDay() + 7) % 7) + (n - 1) * 7;
+  for (const h of Object.values(BANK.holidays)) {
+    const r = h.rule;
+    if ((h.dates || []).includes(iso) || (r && m === r.month - 1 && d === nth(y, m, DOW[r.weekday], r.nth)))
+      return { word: h.words[0], label: h.name };
+  }
+  const doy = Math.floor((date - new Date(y, 0, 0)) / 86400000);
+  for (const [key, a] of Object.entries(BANK.activities))
+    if (acts.includes(key)) return { word: a.words[doy % a.words.length], label: a.label };
+  return { word: BANK.months[m][d - 1], label: "Word of the day" };
+}
 
 
 function renderWord() {
-  const pick = WOTD.pick(today(), activities);
+  const pick = serverWord || (BANK && localPick(today(), activities));
+  if (!pick) return;
   const [en, zh, py, es, def, sent] = pick.word;
   document.getElementById("wlabel").textContent = pick.label;
   const set = (id, t) => document.getElementById(id).textContent = t;
@@ -95,7 +130,7 @@ function render() { renderWord(); }
 
 // Calendar feed: today's activities (swim, soccer...) pick a themed word. Ignored if stale.
 async function loadEvents() {
-  if (params.get("act")) return;
+  if (params.get("act") || serverWord) return;
   try {
     const r = await fetch(EVENTS_URL + "?t=" + Date.now(), { cache: "no-store" });
     if (!r.ok) return;
@@ -106,10 +141,13 @@ async function loadEvents() {
 }
 
 
-document.fonts.ready.then(render);
-render();
-loadEvents();
+(async () => {
+  if (!(await loadServerWord())) { await loadBank(); loadEvents(); }
+  document.fonts.ready.then(render);
+  render();
+})();
 setInterval(loadEvents, 30 * 60 * 1000);
+setInterval(loadServerWord, 60 * 1000);
 let lastDay = isoOf(new Date());
 setInterval(() => { const d = isoOf(new Date()); if (d !== lastDay) { lastDay = d; activities = []; render(); loadEvents(); } }, 60 * 1000);
 addEventListener("resize", render);

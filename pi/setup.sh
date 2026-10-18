@@ -23,7 +23,7 @@ if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q --ff-only; else git clone -q "
 say "Setting up Python"
 python3 -m venv "$DIR/pi/.venv"
 "$DIR/pi/.venv/bin/pip" install -q --upgrade pip
-"$DIR/pi/.venv/bin/pip" install -q icalendar recurring-ical-events pillow pillow-heif androidtvremote2
+"$DIR/pi/.venv/bin/pip" install -q icalendar recurring-ical-events pillow pillow-heif androidtvremote2 gkeepapi
 
 say "Settings"
 mkdir -p "$(dirname "$CONF")"
@@ -114,6 +114,9 @@ if [ -d /etc/xdg/labwc ] || command -v labwc >/dev/null; then
   fi
   grep -q kiosk.sh "$HOME/.config/labwc/autostart" || echo "$DIR/pi/kiosk.sh &" >> "$HOME/.config/labwc/autostart"
 fi
+
+say "Hiding the mouse pointer"
+python3 "$DIR/pi/hide_cursor.py"
 
 say "Keeping the screen awake"
 sudo raspi-config nonint do_blanking 1 || true

@@ -81,6 +81,7 @@ def http(url, data=None, headers=None, timeout=30):
 # refreshes that feed on its own schedule, so changes can take a while to appear.
 _ical = {"next": 0}
 _events = []          # latest events, shared with the drive-time checker
+_cal = {"ready": False}   # set once the first calendar load succeeds
 
 
 def window():
@@ -202,6 +203,7 @@ def update_calendar(cfg):
     if errors and not unique:
         return log("calendar failed:", errors)          # keep the last good file
     _events[:] = unique
+    _cal["ready"] = True
     if write_json("calendar.json", {"updated": datetime.now(TZ).isoformat(), "events": unique,
                                     "error": ", ".join(errors) or None}):
         log(f"calendar: {len(unique)} events ({'Google' if has_api else 'iCal'})")
@@ -231,6 +233,8 @@ def gget(cfg, url):
 
 # ── family list ─────────────────────────────────────────────────────────────
 def update_tasks(cfg):
+    if keep_cfg(cfg) and (cfg["keep"].get("family_list") or "Family List"):
+        return                                          # the Family List comes from Google Keep instead
     if not google_token(cfg):
         write_json("tasks.json", {"items": [], "error": "Google not connected yet"})
         return
@@ -527,6 +531,99 @@ def update_commute(cfg):
                                 "routes": out, "error": err})
 
 
+# ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
+_quotes = {"keep": None}
+
+
+def keep_cfg(cfg):
+    k = cfg.get("keep") or {}
+    return k if k.get("email") and k.get("master_token") else None
+
+
+def update_keep(cfg):
+    k = keep_cfg(cfg)
+    if not k:
+        return
+    import keep_source as ks
+    try:
+        keep = ks.client(k["email"], k["master_token"], os.path.join(DATA, "keep_state.json"))
+    except Exception as e:
+        old = {}
+        try:
+            old = json.load(open(os.path.join(DATA, "tasks.json")))
+        except Exception:
+            pass
+        write_json("tasks.json", {**old, "error": "Google Keep sign-in failed"})
+        raise
+    want = k.get("family_list") or "Family List"
+    fam = ks.find_note(keep, want)
+    if fam:
+        items = ks.note_lines(fam, unchecked_only=True)
+        if write_json("tasks.json", {"title": cfg.get("tasks_title") or fam.title, "items": items, "source": "keep"}):
+            log(f"keep: {len(items)} open on '{fam.title}'")
+    else:
+        write_json("tasks.json", {"items": [], "error": f"Keep note '{want}' not found (is it shared with {k['email']}?)"})
+    qn = ks.find_note(keep, k.get("quotes_note") or "Olivia")
+    if qn:
+        quotes = [q for q in (ks.clean_quote(l) for l in ks.note_lines(qn)) if q]
+        if quotes:
+            _quotes["keep"] = quotes
+            write_json("quotes_keep.json", {"note": qn.title, "quotes": quotes})
+
+
+def update_quote(cfg):
+    import keep_source as ks
+    quotes = _quotes["keep"]
+    if not quotes and keep_cfg(cfg) and os.path.exists(os.path.join(DATA, "quotes_keep.json")):
+        quotes = json.load(open(os.path.join(DATA, "quotes_keep.json"))).get("quotes")
+    if keep_cfg(cfg) and not quotes:
+        return                                     # wait for the first Keep sync (quote.html falls back meanwhile)
+    js_quotes = ks.quotes_from_js(os.path.join(REPO, "quotes.js"))
+    quotes = quotes or js_quotes
+    if not quotes:
+        return
+    hp = os.path.join(DATA, "quote_history.json")
+    if os.path.exists(hp):
+        history = json.load(open(hp, encoding="utf-8"))
+    else:                                          # everything in quotes.js has been on screen already
+        history = {"seed": [ks.norm(q) for q in js_quotes], "days": {}}
+    today = datetime.now(TZ).date()
+    before = json.dumps(history, sort_keys=True)
+    q = ks.pick_quote(quotes, history, today)
+    if json.dumps(history, sort_keys=True) != before:
+        with open(hp + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=1)
+        os.replace(hp + ".tmp", hp)
+    if write_json("quote.json", {"date": today.isoformat(), "name": "Olivia", "quote": q,
+                                 "source": "keep" if quotes is not js_quotes else "quotes.js"}):
+        log("quote:", q)
+
+
+# ── word of the day (never repeats; see wotd.py) ─────────────────────────────
+def events_on(d):
+    out = []
+    for ev in _events:
+        if ev.get("allDay"):
+            s0 = date.fromisoformat(ev["start"])
+            s1 = max(date.fromisoformat(ev.get("end") or ev["start"]), s0 + timedelta(days=1))
+            if s0 <= d < s1:
+                out.append(ev)
+        elif datetime.fromisoformat(ev["start"]).astimezone(TZ).date() == d:
+            out.append(ev)
+    return out
+
+
+def update_word(cfg):
+    if not _cal["ready"]:                       # wait for today's calendar so activity days get themed words
+        return
+    import wotd
+    today = datetime.now(TZ).date()
+    titles = [ev["title"] for ev in events_on(today)]
+    w = wotd.today_word(os.path.join(REPO, "words.json"), os.path.join(DATA, "wotd_history.json"), today, titles)
+    if write_json("word.json", w):
+        log("word:", w["word"][0], "/", w["label"], f"({w['words_left']} new left)")
+
+
 # ── loops ───────────────────────────────────────────────────────────────────
 def every(seconds, fn):
     def run():
@@ -566,9 +663,16 @@ def main():
     every(10 * 60, update_weather)  # weather: every 10 minutes
     every(60, update_alerts)        # severe weather: every minute
     every(60, update_leave)         # drive times: checked every minute, re-routed every 2 min (TomTom)
+    every(60, update_keep)          # Google Keep (Family List + quotes), if set up
+    every(60, update_quote)         # Olivia quote of the day: new quotes first
+    every(60, update_word)          # word of the day: picked once a day, logged so it never repeats
     every(60, update_commute)       # weekday-morning commute: re-routed every 5 min (TomTom) / 30 min
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=REPO))
-    log(f"serving http://localhost:{PORT}/pi/dashboard.html")
+    cfg = load_config()
+    # "bind": "0.0.0.0" lets other machines on the home network load the dashboard (e.g. when
+    # this server runs on mrpopp and the Pi only displays it). Default: this machine only.
+    bind, port = cfg.get("bind", "127.0.0.1"), int(cfg.get("port", PORT))
+    srv = ThreadingHTTPServer((bind, port), partial(Handler, directory=REPO))
+    log(f"serving http://{'localhost' if bind == '127.0.0.1' else bind}:{port}/pi/dashboard.html")
     srv.serve_forever()
 
 

@@ -33,12 +33,25 @@ function today() {
   if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); return new Date(y, m-1, d); }
   return new Date();
 }
+// On the Pi, the server picks the quote (new Google Keep quotes first): /data/quote.json.
+let serverQuote = null;
+const isoToday = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+async function loadServerQuote() {
+  if (params.get("date") || params.get("n")) return;
+  try {
+    const r = await fetch("/data/quote.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    const next = j.date === isoToday() ? j.quote : null;
+    if (next !== serverQuote) { serverQuote = next; render(); }
+  } catch (e) { /* not on the Pi: use quotes.js */ }
+}
 function render() {
   const list = OLIVIA_SAYS.quotes, t = today();
   const day = Math.floor(new Date(t.getFullYear(), t.getMonth(), t.getDate()) / 86400000);
   const i = params.get("n") ? Number(params.get("n")) % list.length : day % list.length;
   const q = document.getElementById("q");
-  q.textContent = list[i].replace(/^"|"$/g, "");
+  q.textContent = (serverQuote || list[i]).replace(/^"|"$/g, "");
   // Largest size that keeps the quote to the space above the label's bottom edge.
   const vh = innerHeight / 100, maxH = innerHeight * 0.62;
   let size = 20;
@@ -47,6 +60,8 @@ function render() {
 }
 document.fonts.ready.then(render);
 render();
+loadServerQuote();
+setInterval(loadServerQuote, 60 * 1000);
 addEventListener("resize", render);
 let lastDay = new Date().toDateString();
 setInterval(() => { const d = new Date().toDateString(); if (d !== lastDay) { lastDay = d; render(); } }, 60 * 1000);
