@@ -146,7 +146,54 @@ def calendar_from_api(cfg):
             if not r.get("nextPageToken"):
                 break
             page = "&pageToken=" + r["nextPageToken"]
+    if cfg.get("holidays", True):
+        out += holidays(cfg, t0, t1)
     return out, []
+
+
+# Family-worthy holidays from Google's public holiday calendars: {calendar: {holiday name: (shown as, colour)}}
+HOLIDAYS = {
+    "en.usa#holiday@group.v.calendar.google.com": {
+        "New Year's Day": ("New Year's Day", "#F6BF26"), "Valentine's Day": ("Valentine's Day", "#E67C73"),
+        "St. Patrick's Day": ("St. Patrick's Day", "#33B679"), "Easter Sunday": ("Easter", "#7986CB"),
+        "Mother's Day": ("Mother's Day", "#E67C73"), "Memorial Day": ("Memorial Day", "#3F51B5"),
+        "Father's Day": ("Father's Day", "#039BE5"), "Independence Day": ("4th of July", "#3F51B5"),
+        "Labor Day": ("Labor Day", "#616161"), "Halloween": ("Halloween", "#F4511E"),
+        "Thanksgiving Day": ("Thanksgiving", "#F4511E"), "Christmas Eve": ("Christmas Eve", "#0B8043"),
+        "Christmas Day": ("Christmas", "#0B8043"), "New Year's Eve": ("New Year's Eve", "#F6BF26"),
+    },
+    "en.china#holiday@group.v.calendar.google.com": {
+        "Spring Festival Eve": ("Lunar New Year's Eve", "#D50000"), "Chinese New Year": ("Lunar New Year", "#D50000"),
+        "Lantern Festival": ("Lantern Festival", "#D50000"), "Dragon Boat Festival": ("Dragon Boat Festival", "#33B679"),
+        "Mid-Autumn Festival": ("Mid-Autumn Festival", "#F6BF26"),
+    },
+}
+_hol = {}   # calendar -> (fetched at, window start, events)
+
+
+def holidays(cfg, t0, t1):
+    """Holiday events for the calendar window, refreshed twice a day. Never breaks the calendar."""
+    out = []
+    for cal, keep in HOLIDAYS.items():
+        at, key, evs = _hol.get(cal, (0, "", []))
+        if key != t0 or time.time() - at > 12 * 3600:
+            try:
+                url = ("https://www.googleapis.com/calendar/v3/calendars/" + urllib.parse.quote(cal) +
+                       "/events?singleEvents=true&maxResults=250&timeMin=" + urllib.parse.quote(t0) +
+                       "&timeMax=" + urllib.parse.quote(t1))
+                evs = []
+                for ev in json.loads(gget(cfg, url)).get("items", []):
+                    name = (ev.get("summary") or "").strip()
+                    st = (ev.get("start") or {}).get("date")
+                    if name in keep and st:
+                        title, color = keep[name]
+                        evs.append({"title": title, "start": st[:10], "end": ((ev.get("end") or {}).get("date") or st)[:10],
+                                    "allDay": True, "color": color, "holiday": True})
+                _hol[cal] = (time.time(), t0, evs)
+            except Exception as e:
+                log("holidays:", cal.split("#")[0], e)    # keep the last good list for this calendar
+        out += evs
+    return out
 
 
 def calendar_from_ical(cfg):
