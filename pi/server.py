@@ -147,7 +147,14 @@ def calendar_from_api(cfg):
                 break
             page = "&pageToken=" + r["nextPageToken"]
     if cfg.get("holidays", True):
-        out += holidays(cfg, t0, t1)
+        mine = {}
+        for ev in out:                                   # skip a holiday the family calendar already has that day
+            mine.setdefault(ev["start"][:10], []).append(ev["title"].lower())
+        for h in holidays(cfg, t0, t1):
+            words = [w for w in re.findall(r"[a-z']+", h["title"].lower()) if len(w) > 3][:2]
+            if not any(all(w in t for w in words) or ("daylight" in t and "clocks" in h["title"].lower())
+                       for t in mine.get(h["start"], [])):
+                out.append(h)
     return out, []
 
 
@@ -161,6 +168,8 @@ HOLIDAYS = {
         "Labor Day": ("Labor Day", "#616161"), "Halloween": ("Halloween", "#F4511E"),
         "Thanksgiving Day": ("Thanksgiving", "#F4511E"), "Christmas Eve": ("Christmas Eve", "#0B8043"),
         "Christmas Day": ("Christmas", "#0B8043"), "New Year's Eve": ("New Year's Eve", "#F6BF26"),
+        "Daylight Saving Time starts": ("Spring Forward (clocks +1 hr)", "#616161"),
+        "Daylight Saving Time ends": ("Fall Back (clocks −1 hr)", "#616161"),
     },
     "en.china#holiday@group.v.calendar.google.com": {
         "Spring Festival Eve": ("Lunar New Year's Eve", "#D50000"), "Chinese New Year": ("Lunar New Year", "#D50000"),
