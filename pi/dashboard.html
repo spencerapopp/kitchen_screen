@@ -135,7 +135,7 @@
 // ── settings ──
 const LAT = 33.0198, LNG = -96.6989;      // Plano, TX
 const WEEKS = 5;
-const PHOTO_SECONDS = 60;
+let photoSeconds = 20;                       // server sends "photo_seconds" from config.json
 const DATA = "/data/";                       // written by server.py on the Pi
 
 // Test hook: dashboard.html?date=2026-10-08
@@ -292,12 +292,20 @@ async function loadTasks() {
 // ── photos (Google Drive "Kitchen Photos" folder, cached on the Pi) ──
 let photos = [], photoIdx = -1, front = "phA";
 async function loadPhotos() {
-  try { const p = await getJSON(DATA + "photos.json"); photos = p.photos || []; setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
+  try { const p = await getJSON(DATA + "photos.json");
+        if (JSON.stringify(p.photos || []) !== JSON.stringify(photos)) deck = [];
+        photos = p.photos || []; photoSeconds = Math.max(5, Number(p.seconds) || 20); setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
   if (photoIdx < 0) nextPhoto();
 }
+let deck = [];                                  // shuffled order: every photo once before any repeats
 function nextPhoto() {
   if (!photos.length) return;
-  photoIdx = (photoIdx + 1 + Math.floor(Math.random() * Math.max(1, photos.length - 1))) % photos.length;
+  if (!deck.length) {
+    deck = photos.map((_, i) => i);
+    for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+    if (deck.length > 1 && deck[deck.length - 1] === photoIdx) deck.unshift(deck.pop());   // no back-to-back repeat
+  }
+  photoIdx = deck.pop();
   const url = DATA + photos[photoIdx];
   const img = new Image();
   img.onload = () => {
@@ -369,7 +377,7 @@ loadBanner(); setInterval(loadBanner, 20 * 1000); setInterval(renderBanner, 15 *
 loadWeather(); setInterval(loadWeather, 60 * 1000);
 loadCalendar(); setInterval(loadCalendar, 15 * 1000);
 loadTasks(); setInterval(loadTasks, 10 * 1000);
-loadPhotos(); setInterval(loadPhotos, 5 * 60 * 1000); setInterval(nextPhoto, PHOTO_SECONDS * 1000);
+loadPhotos(); setInterval(loadPhotos, 5 * 60 * 1000); (function photoTick() { nextPhoto(); setTimeout(photoTick, photoSeconds * 1000); })();
 let lastDay = ymd(new Date());
 setInterval(() => { if (ymd(new Date()) !== lastDay) { lastDay = ymd(new Date()); renderCalendar(); } }, 60 * 1000);
 setTimeout(() => location.reload(), 12 * 60 * 60 * 1000);   // pick up new code twice a day

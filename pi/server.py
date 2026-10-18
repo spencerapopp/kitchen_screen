@@ -38,7 +38,7 @@ TZ = ZoneInfo("America/Chicago")
 PORT = 8080
 WEEKS = 5
 PHOTO_MAX = 1600          # longest side, pixels
-MAX_PHOTOS = 400
+MAX_PHOTOS = 1000
 
 
 def log(*a):
@@ -323,7 +323,8 @@ def update_photos(cfg):
     for name in os.listdir(PHOTOS):
         if name.endswith(".jpg") and name not in wanted:
             os.remove(os.path.join(PHOTOS, name))
-    write_json("photos.json", {"photos": keep, "error": f"{failed} photos could not be read" if failed else None})
+    write_json("photos.json", {"photos": keep, "seconds": int(cfg.get("photo_seconds", 20)),
+                                "error": f"{failed} photos could not be read" if failed else None})
     log(f"photos: {len(keep)} ({added} new)")
 
 
