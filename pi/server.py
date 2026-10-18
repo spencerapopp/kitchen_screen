@@ -682,8 +682,11 @@ class Handler(SimpleHTTPRequestHandler):
         return super().translate_path(path)
 
     def end_headers(self):
-        if self.path.startswith("/data/") and self.path.split("?")[0].endswith(".json"):
+        path = self.path.split("?")[0]
+        if path.startswith("/data/") and path.endswith(".json"):
             self.send_header("Cache-Control", "no-store")
+        elif path.endswith((".html", ".js", ".json", ".css")) or path.endswith("/"):
+            self.send_header("Cache-Control", "no-cache")      # always check for updated pages after a pull
         super().end_headers()
 
     def log_message(self, *a):
