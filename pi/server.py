@@ -366,6 +366,7 @@ def update_alerts(cfg):
 # traffic. Without one, OpenStreetMap routing gives typical drive times.
 LEAVE_WINDOW_H = 3
 _geo = {}
+_tomtom = {"error": None}   # last TomTom problem, shown on the status line
 _drive = {}
 
 
@@ -381,12 +382,16 @@ def geocode(cfg, q):
     pt = None
     key = cfg.get("tomtom_key")
     if key:
-        r = json.loads(http(f"https://api.tomtom.com/search/2/search/{urllib.parse.quote(q)}.json"
-                            f"?key={key}&lat={lat}&lon={lng}&radius=80000&limit=1"))
-        if r.get("results"):
-            p = r["results"][0]["position"]
-            pt = [p["lat"], p["lon"]]
-    else:
+        try:
+            r = json.loads(http(f"https://api.tomtom.com/search/2/search/{urllib.parse.quote(q)}.json"
+                                f"?key={key}&lat={lat}&lon={lng}&radius=80000&limit=1"))
+            if r.get("results"):
+                p = r["results"][0]["position"]
+                pt = [p["lat"], p["lon"]]
+            _tomtom["error"] = None
+        except Exception as e:
+            _tomtom["error"] = tomtom_problem(e)
+    if pt is None:
         box = f"{lng-0.8},{lat+0.6},{lng+0.8},{lat-0.6}"          # bias to DFW
         r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=1&viewbox=" + box +
                             "&q=" + urllib.parse.quote(q),
@@ -404,16 +409,28 @@ def drive_minutes(cfg, a, b):
     return m, live
 
 
+def tomtom_problem(e):
+    code = getattr(e, "code", None)
+    if code in (401, 403):
+        return f"TomTom key rejected ({code}): showing usual drive times"
+    return f"TomTom unavailable ({code or type(e).__name__}): showing usual drive times"
+
+
 def drive_route(cfg, a, b):
-    """(minutes now, live traffic?, minutes with no traffic)"""
+    """(minutes now, live traffic?, minutes with no traffic). Falls back to usual times if TomTom fails."""
     key = cfg.get("tomtom_key")
     if key:
-        r = json.loads(http(f"https://api.tomtom.com/routing/1/calculateRoute/{a[0]},{a[1]}:{b[0]},{b[1]}/json"
-                            f"?key={key}&traffic=true&travelMode=car&routeType=fastest&computeTravelTimeFor=all"))
-        sm = r["routes"][0]["summary"]
-        now_m = round(sm["travelTimeInSeconds"] / 60)
-        free_m = round(sm.get("noTrafficTravelTimeInSeconds", sm["travelTimeInSeconds"]) / 60)
-        return now_m, True, free_m
+        try:
+            r = json.loads(http(f"https://api.tomtom.com/routing/1/calculateRoute/{a[0]},{a[1]}:{b[0]},{b[1]}/json"
+                                f"?key={key}&traffic=true&travelMode=car&routeType=fastest&computeTravelTimeFor=all"))
+            sm = r["routes"][0]["summary"]
+            now_m = round(sm["travelTimeInSeconds"] / 60)
+            free_m = round(sm.get("noTrafficTravelTimeInSeconds", sm["travelTimeInSeconds"]) / 60)
+            _tomtom["error"] = None
+            return now_m, True, free_m
+        except Exception as e:
+            _tomtom["error"] = tomtom_problem(e)
+            log(_tomtom["error"])
     r = json.loads(http(f"https://router.project-osrm.org/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=false",
                         headers={"User-Agent": "kitchen-screen (family dashboard)"}))
     m = round(r["routes"][0]["duration"] / 60 * 1.2)            # OSRM runs optimistic; pad 20%
@@ -528,8 +545,9 @@ def update_commute(cfg):
         except Exception as e:
             err = str(e)[:120]
         out.append(row)
+    live = live and not _tomtom["error"]
     write_json("commute.json", {"show": True, "live": live, "updated": now.isoformat(timespec="minutes"),
-                                "routes": out, "error": err})
+                                "routes": out, "error": err or _tomtom["error"]})
 
 
 # ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
