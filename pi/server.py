@@ -370,13 +370,21 @@ _tomtom = {"error": None}   # last TomTom problem, shown on the status line
 _drive = {}
 
 
+ABBREV = {"trl": "Trail", "rd": "Road", "ln": "Lane", "dr": "Drive", "st": "Street", "ave": "Avenue",
+          "blvd": "Boulevard", "pkwy": "Parkway", "ct": "Court", "cir": "Circle", "hwy": "Highway", "pl": "Place"}
+
+
+def expand_abbrev(q):
+    return re.sub(r"\b([A-Za-z]+)\.?(?=[ ,]|$)", lambda m: ABBREV.get(m.group(1).lower(), m.group(1)), q)
+
+
 def geocode(cfg, q):
-    if q in _geo:
+    if _geo.get(q):
         return _geo[q]
     cache = os.path.join(DATA, "geocache.json")
     if not _geo and os.path.exists(cache):
-        _geo.update(json.load(open(cache)))
-        if q in _geo:
+        _geo.update({k: v for k, v in json.load(open(cache)).items() if v})   # drop old failed lookups
+        if _geo.get(q):
             return _geo[q]
     lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
     pt = None
@@ -393,12 +401,17 @@ def geocode(cfg, q):
             _tomtom["error"] = tomtom_problem(e)
     if pt is None:
         box = f"{lng-0.8},{lat+0.6},{lng+0.8},{lat-0.6}"          # bias to DFW
-        r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=1&viewbox=" + box +
-                            "&q=" + urllib.parse.quote(q),
-                            headers={"User-Agent": "kitchen-screen (family dashboard)"}))
-        if r:
-            pt = [float(r[0]["lat"]), float(r[0]["lon"])]
-        time.sleep(1.1)                                           # Nominatim: max 1 request/second
+        for query in dict.fromkeys([q, expand_abbrev(q)]):          # "6412 Allegheny Trl" -> "... Trail"
+            r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us"
+                                "&viewbox=" + box + "&q=" + urllib.parse.quote(query),
+                                headers={"User-Agent": "kitchen-screen (family dashboard)"}))
+            time.sleep(1.1)                                       # Nominatim: max 1 request/second
+            if r:
+                pt = [float(r[0]["lat"]), float(r[0]["lon"])]
+                break
+    if pt is None:
+        log("address not found:", q)
+        return None                                               # not cached: tried again next time
     _geo[q] = pt
     write_json("geocache.json", dict(_geo))
     return pt
@@ -522,6 +535,9 @@ def update_commute(cfg):
         write_json("commute.json", {"show": False, "error": "no home_address in config"})
         return
     home = geocode(cfg, home_q)
+    if not home:
+        write_json("commute.json", {"show": False, "error": "home address not found by the map service"})
+        return
     off = no_school_days() if any(d.get("school") for d in dests) else set()
     today = now.date().isoformat()
     live = bool(cfg.get("tomtom_key"))
