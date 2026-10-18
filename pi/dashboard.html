@@ -105,6 +105,7 @@
   #banner .cm{flex:1;min-width:0;text-align:center;}
   #banner .cm + .cm{border-left:1px solid var(--panel-line);}
   #banner .cm .n{color:var(--muted);font-size:15px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #banner .cm .n.long{font-size:12px;letter-spacing:.08em;line-height:1.15;white-space:normal;}   /* "Andrews Elementary" wraps */
   #banner .cm .m{font-size:34px;font-weight:300;line-height:1.1;color:var(--ink);}
   #banner .cm .m small{font-size:17px;color:var(--muted);margin-left:3px;}
   #banner .cm .d{font-size:15px;color:var(--dim);white-space:nowrap;}
@@ -346,11 +347,11 @@ function renderBanner() {
     b.className = "block show commute";
     b.style.setProperty("--ic", "var(--bay)");
     b.innerHTML = CAR + commute.routes.map(r => {
-      if (r.off) return `<div class="cm off"><div class="n">${esc(r.name)}</div><div class="m">No school</div><div class="d">&nbsp;</div></div>`;
+      if (r.off) return `<div class="cm off"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">No school</div><div class="d">&nbsp;</div></div>`;
       if (r.minutes == null) return `<div class="cm"><div class="n">${esc(r.name)}</div><div class="m">–</div><div class="d">&nbsp;</div></div>`;
       const cls = !r.live ? "" : r.delay >= 10 ? " bad" : r.delay >= 4 ? " slow" : "";
       const d = !r.live ? "usual time" : r.delay >= 1 ? `+${r.delay} traffic` : "clear";
-      return `<div class="cm${cls}"><div class="n">${esc(r.name)}</div><div class="m">${r.minutes}<small>min</small></div><div class="d">${d}</div></div>`;
+      return `<div class="cm${cls}"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">${r.minutes}<small>min</small></div><div class="d">${d}</div></div>`;
     }).join("");
     return;
   }
