@@ -94,7 +94,7 @@ def main():
     print(f"\nKitchen screen check — {datetime.now():%a %b %d %H:%M}\n")
     for s, w_, d in rows:
         print(f"  {s} {w_:<20} {d}")
-    print("\nFIX lines need attention. Logs:  journalctl --user -u kitchen -n 40 --no-pager\n")
+    print("\nFIX lines need attention. Logs:  journalctl --user-unit kitchen -n 40 --no-pager\n")
 
 
 if __name__ == "__main__":

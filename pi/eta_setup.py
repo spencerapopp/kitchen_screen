@@ -63,7 +63,7 @@ def main():
     except Exception as ex:
         ok = False
         print("Local test failed:", ex)
-    print("\nReceiver:", "working" if ok else "NOT answering (check: journalctl --user -u kitchen -n 40)")
+    print("\nReceiver:", "working" if ok else "NOT answering (check: journalctl --user-unit kitchen -n 40)")
     print("\nIn the OwnTracks app: Preferences > Connection > Mode: HTTP, and set the URL to:\n")
     print(f"    https://{host}/owntracks/{e['token']}\n")
     print("Keep that address private: it's how the screen knows it's really your phone.")
