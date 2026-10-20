@@ -720,11 +720,13 @@ def update_leave(cfg):
     buffer = int(cfg.get("leave_buffer_min", 5))
     # Hidden trips (school drop-off) are skipped on days marked "No school", "Holiday", "Closed", etc.
     off_days = no_school_days()
+    mt = cfg.get("morning_trip") or []
+    covered = {c for t in (mt if isinstance(mt, list) else [mt]) for c in t.get("covers") or []}
     trips = []
     for ev in list(_events):
         loc = ev.get("location")
-        if ev.get("allDay") or not loc:
-            continue
+        if ev.get("allDay") or not loc or ev["title"] in covered:
+            continue                                   # covered = handled by the morning trip card
         start = datetime.fromisoformat(ev["start"])
         if not (now < start <= now + timedelta(hours=LEAVE_WINDOW_H)):
             continue
