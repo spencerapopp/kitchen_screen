@@ -837,6 +837,7 @@ def update_eta(cfg):
 
 # ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
 _quotes = {"keep": None}
+_keep_fail = {"n": 0}
 
 
 def keep_cfg(cfg):
@@ -851,14 +852,24 @@ def update_keep(cfg):
     import keep_source as ks
     try:
         keep = ks.client(k["email"], k["master_token"], os.path.join(DATA, "keep_state.json"))
+        _keep_fail["n"] = 0
     except Exception as e:
-        old = {}
-        try:
-            old = json.load(open(os.path.join(DATA, "tasks.json")))
-        except Exception:
-            pass
-        write_json("tasks.json", {**old, "error": "Google Keep sign-in failed"})
-        raise
+        # Keep hiccups now and then; start a fresh session next minute and only
+        # flag it on screen if it keeps failing (the list stays as last synced).
+        ks._state["keep"] = None
+        _keep_fail["n"] += 1
+        why = f"{type(e).__name__}: {str(e)[:160]}"
+        log(f"keep sync failed ({_keep_fail['n']}x): {why}")
+        if _keep_fail["n"] >= 5:
+            old = {}
+            try:
+                old = json.load(open(os.path.join(DATA, "tasks.json")))
+            except Exception:
+                pass
+            bad_token = any(w in why for w in ("BadAuthentication", "NeedsBrowser", "LoginException"))
+            write_json("tasks.json", {**old, "error": "Google Keep sign-in expired: run pi/keep_auth.py"
+                                      if bad_token else "Google Keep not syncing (list may be out of date)"})
+        return
     want = k.get("family_list") or "Family List"
     fam = ks.find_note(keep, want)
     if fam:
