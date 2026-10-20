@@ -443,18 +443,19 @@ def update_air(cfg):
             word, lvl = next((w, l) for top, w, l in AQI_LEVELS if v <= top)
             _air.update(aqi={"value": v, "level": word, "lvl": lvl}, aqi_at=now)
     except Exception as e:
-        err.append("air quality: " + type(e).__name__)
+        err.append(f"air quality: {type(e).__name__} {str(e)[:80]}")
     z = home_zip(cfg)
     if z and cfg.get("pollen", True):
         try:
             _air.update(pollen=pollen_today(z), pollen_at=now)
         except Exception as e:
-            err.append("pollen: " + (str(e)[:60] if isinstance(e, ValueError) else type(e).__name__))
+            err.append(f"pollen: {type(e).__name__} {str(e)[:80]}")
     for k in ("aqi", "pollen"):                       # a reading older than 6 hours is dropped
         if _air[k] and now - _air[k + "_at"] > 6 * 3600:
             _air[k] = None
     if err:
         log("air:", "; ".join(err))
+        _air["at"] = now - 25 * 60                    # a failure is retried in 5 minutes, not 30
     write_json("air.json", {"aqi": _air["aqi"], "pollen": _air["pollen"],
                             "error": ("no " + " / ".join(e.split(":")[0] for e in err) + " data") if err and not (_air["aqi"] and _air["pollen"]) else None})
 
