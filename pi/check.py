@@ -61,6 +61,16 @@ def main():
     k = cfg.get("keep") or {}
     add(OK if k.get("master_token") else MEH, "Google Keep",
         f"{k.get('email')} -> '{k.get('family_list')}', '{k.get('quotes_note')}'" if k.get("master_token") else "not set up (pi/keep_auth.py)")
+    a, m = data("air.json")
+    if a is not None:
+        po, aq = (a or {}).get("pollen"), (a or {}).get("aqi")
+        add(OK if po and aq else BAD, "pollen + air",
+            f"pollen {po['level'] + ' (' + ', '.join(po.get('triggers') or []) + ')' if po else 'MISSING'} | "
+            f"air {str(aq['value']) + ' ' + aq['level'] if aq else 'MISSING'}" + (f" | {a['error']}" if a.get("error") else ""))
+    cd, _ = data("countdown.json")
+    if cd is not None:
+        add(MEH, "countdown", f"{cd.get('label')}: {cd.get('days')} days" if cd.get("show") else "nothing coming up"
+            + ("" if cfg.get("birthdays") else " (add \"birthdays\" to config.json)"))
     w, _ = data("word.json")
     if w:
         add(MEH, "today's word", f"{w['word'][0]} {w['word'][1]} ({w['label']}), {w.get('words_left')} new words left")

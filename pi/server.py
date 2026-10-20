@@ -396,6 +396,157 @@ def update_weather(cfg):
         log("weather:", round(w["current"]["temperature_2m"]), "F")
 
 
+# ── air quality + pollen (small color-coded chips under the temperature) ────
+# Air: Open-Meteo (US AQI, free, no key). Pollen: Pollen.com's forecast for the home ZIP
+# (free, no key, unofficial). Refreshed every 30 minutes; a failure keeps the last reading.
+AQI_LEVELS = [(50, "Good", 0), (100, "Moderate", 1), (150, "Sensitive", 2), (200, "Unhealthy", 3),
+              (300, "Very unhealthy", 4), (10_000, "Hazardous", 5)]
+POLLEN_LEVELS = [(2.4, "Low", 0), (4.8, "Low-Med", 0), (7.2, "Medium", 1), (9.6, "Med-High", 2), (12.1, "High", 3)]
+_air = {"at": 0, "aqi": None, "pollen": None, "aqi_at": 0, "pollen_at": 0}
+
+
+def home_zip(cfg):
+    m = re.search(r"\b(\d{5})(?:-\d{4})?\s*$", cfg.get("home_address", "").strip())
+    return cfg.get("zip") or (m.group(1) if m else None)
+
+
+def pollen_today(z):
+    r = json.loads(http(f"https://www.pollen.com/api/forecast/current/pollen/{z}",
+                        headers={"Referer": f"https://www.pollen.com/forecast/current/pollen/{z}",
+                                 "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36",
+                                 "Accept": "application/json"}))
+    periods = (r.get("Location") or {}).get("periods") or []
+    today = next((x for x in periods if x.get("Type") == "Today"), periods[1] if len(periods) > 1 else None)
+    if not today or today.get("Index") is None:
+        raise ValueError("no pollen forecast for today")
+    idx = float(today["Index"])
+    word, lvl = next((w, l) for top, w, l in POLLEN_LEVELS if idx <= top)
+    trig = today.get("Triggers") or []
+    trig = trig.values() if isinstance(trig, dict) else trig
+    names = [t.get("Name") for t in trig if isinstance(t, dict) and t.get("Name")]
+    return {"index": round(idx, 1), "level": word, "lvl": lvl, "triggers": names[:3]}
+
+
+def update_air(cfg):
+    now = time.time()
+    if now - _air["at"] < 30 * 60:
+        return
+    _air["at"] = now
+    lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
+    err = []
+    try:
+        r = json.loads(http(f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lng}"
+                            "&current=us_aqi&timezone=America%2FChicago"))
+        v = r["current"]["us_aqi"]
+        if v is not None:
+            v = round(v)
+            word, lvl = next((w, l) for top, w, l in AQI_LEVELS if v <= top)
+            _air.update(aqi={"value": v, "level": word, "lvl": lvl}, aqi_at=now)
+    except Exception as e:
+        err.append("air quality: " + type(e).__name__)
+    z = home_zip(cfg)
+    if z and cfg.get("pollen", True):
+        try:
+            _air.update(pollen=pollen_today(z), pollen_at=now)
+        except Exception as e:
+            err.append("pollen: " + (str(e)[:60] if isinstance(e, ValueError) else type(e).__name__))
+    for k in ("aqi", "pollen"):                       # a reading older than 6 hours is dropped
+        if _air[k] and now - _air[k + "_at"] > 6 * 3600:
+            _air[k] = None
+    if err:
+        log("air:", "; ".join(err))
+    write_json("air.json", {"aqi": _air["aqi"], "pollen": _air["pollen"],
+                            "error": ("no " + " / ".join(e.split(":")[0] for e in err) + " data") if err and not (_air["aqi"] and _air["pollen"]) else None})
+
+
+# ── countdown: one at a time, shown in the banner spot when nothing else is there ──
+# Holidays come built in. Family birthdays: "birthdays": {"Olivia": "MM-DD", ...} in config.json.
+# Trips come from the calendar (titles with "trip" or "vacation").
+LUNAR_NEW_YEAR = {2027: "02-06", 2028: "01-26", 2029: "02-13", 2030: "02-03", 2031: "01-23", 2032: "02-11"}
+
+
+def easter(y):
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l + 433) // 432
+    mo = (h + l - 7 * m + 90) // 25
+    return date(y, mo, (h + l - 7 * m + 33 * mo + 19) % 32)
+
+
+def nth_weekday(y, mo, wd, n):
+    d = date(y, mo, 1)
+    return d + timedelta(days=(wd - d.weekday()) % 7 + 7 * (n - 1))
+
+
+COUNTDOWN_HOLIDAYS = [   # name, icon, days ahead it starts showing, date for a year
+    ("Halloween", "pumpkin", 30, lambda y: date(y, 10, 31)),
+    ("Thanksgiving", "leaf", 25, lambda y: nth_weekday(y, 11, 3, 4)),
+    ("Christmas", "tree", 30, lambda y: date(y, 12, 25)),
+    ("Lunar New Year", "lantern", 21, lambda y: date.fromisoformat(f"{y}-{LUNAR_NEW_YEAR[y]}") if y in LUNAR_NEW_YEAR else None),
+    ("Valentine's Day", "heart", 10, lambda y: date(y, 2, 14)),
+    ("Easter", "egg", 14, easter),
+    ("Fourth of July", "star", 10, lambda y: date(y, 7, 4)),
+]
+TRIP = re.compile(r"\btrip\b|vacation", re.I)
+
+
+def countdown_candidates(cfg, today):
+    out = []
+    for name, icon, window, fn in COUNTDOWN_HOLIDAYS:
+        for y in (today.year, today.year + 1):
+            d = fn(y)
+            if d and 0 <= (d - today).days <= window:
+                out.append({"label": name, "icon": icon, "kind": "holiday", "days": (d - today).days})
+    for who, md in (cfg.get("birthdays") or {}).items():
+        try:
+            m, dd = map(int, md.split("-")[-2:])
+            d = date(today.year, m, dd)
+            if d < today:
+                d = date(today.year + 1, m, dd)
+        except ValueError:
+            continue
+        if (d - today).days <= 45:
+            out.append({"label": f"{who}'s birthday", "icon": "gift", "kind": "birthday", "days": (d - today).days})
+    seen = set()
+    for ev in sorted(_events, key=lambda e: e["start"]):
+        title = re.sub(r"[^\w&'’\-–—,. ]+", "", ev["title"]).strip(" -–—")
+        if not TRIP.search(title) or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        d = date.fromisoformat(ev["start"][:10])
+        if 0 <= (d - today).days <= 60:
+            out.append({"label": title, "icon": "plane", "kind": "trip", "days": (d - today).days})
+    return sorted(out, key=lambda c: (c["days"], {"birthday": 0, "holiday": 1, "trip": 2}[c["kind"]]))
+
+
+def pick_countdown(cands, today):
+    """Today's one countdown: anything happening today or within a week wins; otherwise the
+    nearest holiday, with a birthday or trip countdown mixed in every third day while that
+    holiday is still 2+ weeks away."""
+    if not cands:
+        return None
+    if cands[0]["days"] <= 7:
+        return cands[0]
+    main = next((c for c in cands if c["kind"] == "holiday"), cands[0])
+    others = [c for c in cands if c is not main]
+    n = today.toordinal()
+    if others and n % 3 == 0 and (main["kind"] != "holiday" or main["days"] >= 14):
+        return others[(n // 3) % len(others)]
+    return main
+
+
+def update_countdown(cfg):
+    if cfg.get("countdown") is False:
+        return write_json("countdown.json", {"show": False})
+    today = datetime.now(TZ).date()
+    c = pick_countdown(countdown_candidates(cfg, today), today)
+    write_json("countdown.json", {"show": bool(c), **(c or {}), "date": today.isoformat()})
+
+
 # ── severe weather (National Weather Service, free, no key) ────────────────
 def update_alerts(cfg):
     lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
@@ -1007,6 +1158,8 @@ def main():
     every(60, update_word)          # word of the day: picked once a day, logged so it never repeats
     every(60, update_commute)       # weekday-morning commute: re-routed every 5 min (TomTom) / 30 min
     every(30, update_eta)           # on the way home: ETA from the phone's location, if set up
+    every(60, update_air)           # air quality + pollen: refreshed every 30 minutes
+    every(60, update_countdown)     # holiday / birthday / trip countdown: one a day
     cfg = load_config()
     # "bind": "0.0.0.0" lets other machines on the home network load the dashboard (e.g. when
     # this server runs on mrpopp and the Pi only displays it). Default: this machine only.
