@@ -122,6 +122,20 @@
   #banner .cm.trip.soon .m b{color:var(--peach);}
   #banner .cm.trip.now .m b{color:var(--peach);font-weight:500;}
   #banner .cm.trip.bad .m b, #banner .cm.trip .d .bad{color:#F28B82;}
+  /* two people: one row each */
+  #banner.rows{padding:0 18px 0 20px;gap:14px;}
+  #banner .trows{flex:1;min-width:0;display:flex;flex-direction:column;}
+  #banner .tr{display:flex;align-items:center;gap:12px;height:48px;}
+  #banner .tr + .tr{border-top:1px solid var(--panel-line);}
+  #banner .tr .who{flex:0 0 78px;color:var(--muted);font-size:14px;letter-spacing:.12em;text-transform:uppercase;line-height:1.1;}
+  #banner .tr .who small{display:block;font-size:11px;letter-spacing:.04em;text-transform:none;color:var(--peach);}
+  #banner .tr .m{flex:0 0 auto;max-width:190px;font-size:27px;font-weight:300;white-space:nowrap;overflow:hidden;color:var(--ink);}
+  #banner .tr .m b{font-weight:400;color:var(--bay);}
+  #banner .tr.soon .m b, #banner .tr.now .m b{color:var(--peach);}
+  #banner .tr.bad .m b, #banner .tr .d .bad{color:#F28B82;}
+  #banner .tr .d{flex:1;min-width:0;font-size:14px;line-height:1.2;color:var(--muted);white-space:nowrap;overflow:hidden;}
+  #banner .tr .d .late{color:var(--peach);}
+  #banner .tr.off .m{font-size:22px;color:var(--dim);}
   #banner.commute.soon{border-color:rgba(242,185,138,.6);background:rgba(242,185,138,.10);}
   #banner.commute.now{border-color:var(--peach);background:rgba(242,185,138,.2);}
 
@@ -341,6 +355,8 @@ let alerts = [], trips = [], commute = { show: false };
 const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 // "Leave 7:42 · Pre-K 7:50 · SHQ 8:28": leaving later than the leave time pushes the arrivals out.
 function tripCard(m, now) {
+  if (m.off) return { state: "", html: `<div class="cm off"><div class="n">${esc(m.name)}</div><div class="m">No school</div><div class="d">&nbsp;</div></div>`,
+                      row: `<div class="tr off"><div class="who">${esc(m.name)}</div><div class="m">No school</div><div class="d"></div></div>` };
   const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
   const leave = new Date(m.leave), by = m.by ? new Date(m.by) : null;
   const mins = Math.ceil((leave - now) / 60000);
@@ -358,7 +374,10 @@ function tripCard(m, now) {
   const parts = [];
   if (m.via) parts.push(`<span class="${viaLate ? "late" : ""}">${esc(m.via)} ${clock(atVia)}</span>`);
   parts.push(`<span class="${by && late ? "bad" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
+  const tag = m.live && m.delay >= 4 ? `+${m.delay} traffic` : "";
   return { state: late && mins <= 0 ? "now" : state,
+           row: `<div class="tr ${state}${late ? " bad" : ""}"><div class="who">${esc(m.name)}${tag ? `<small>${tag}</small>` : ""}</div>` +
+                `<div class="m">${big}</div><div class="d">${parts.join("<br>")}</div></div>`,
            html: `<div class="cm trip ${state}${late ? " bad" : ""}"><div class="n">${esc(who)}</div>` +
                  `<div class="m">${big}</div><div class="d">${parts.join(" · ")}</div></div>` };
 }
@@ -376,23 +395,25 @@ function renderBanner() {
     return;
   }
   const t = new Date();
-  const mt = commute.show ? commute.trip : null;
-  const covered = new Set((mt && mt.covers) || []);           // e.g. "Pre-K Dropoff": the trip card covers it
+  const mts = commute.show ? (commute.trips || (commute.trip ? [commute.trip] : [])) : [];
+  const covered = new Set(mts.flatMap(m => m.covers || []));  // e.g. "Pre-K Dropoff": the trip card covers it
   const trip = trips.find(x => new Date(x.start) > t && !covered.has(x.title));
   const tripMins = trip ? Math.round((new Date(trip.leave) - t) / 60000) : Infinity;
   // Weekday mornings: drive times to the usual places, unless a "leave" is due within 15 minutes.
-  if (commute.show && ((commute.routes || []).length || mt) && tripMins > 15) {
-    const tc = mt ? tripCard(mt, t) : null;
-    b.className = "block show commute" + (tc ? " " + tc.state : "");
-    b.style.setProperty("--ic", tc && tc.state ? "var(--peach)" : "var(--bay)");
-    b.innerHTML = CAR + (tc ? tc.html : "") + (commute.routes || []).map(r => {
+  if (commute.show && ((commute.routes || []).length || mts.length) && tripMins > 15) {
+    const tcs = mts.map(m => tripCard(m, t));
+    const state = tcs.some(c => c.state === "now") ? "now" : tcs.some(c => c.state === "soon") ? "soon" : "";
+    const rows = tcs.length > 1;                                // two people: one row each
+    b.className = "block show commute" + (rows ? " rows" : "") + (state ? " " + state : "");
+    b.style.setProperty("--ic", state ? "var(--peach)" : "var(--bay)");
+    b.innerHTML = CAR + (rows ? `<div class="trows">${tcs.map(c => c.row).join("")}</div>` : tcs.map(c => c.html).join("")) + (commute.routes || []).map(r => {
       if (r.off) return `<div class="cm off"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">No school</div><div class="d">&nbsp;</div></div>`;
       if (r.minutes == null) return `<div class="cm"><div class="n">${esc(r.name)}</div><div class="m">–</div><div class="d">&nbsp;</div></div>`;
       const cls = !r.live ? "" : r.delay >= 10 ? " bad" : r.delay >= 4 ? " slow" : "";
       const d = !r.live ? "usual time" : r.delay >= 1 ? `+${r.delay} traffic` : "clear";
       return `<div class="cm${cls}"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">${r.minutes}<small>min</small></div><div class="d">${d}</div></div>`;
     }).join("");
-    for (const el of b.querySelectorAll(".cm.trip .n, .cm.trip .d, .cm.trip .m")) {   // long names shrink to fit
+    for (const el of b.querySelectorAll(".cm.trip .n, .cm.trip .d, .cm.trip .m, .tr .d, .tr .m")) {   // long names shrink to fit
       for (let fs = parseFloat(getComputedStyle(el).fontSize); fs > 11 && el.scrollWidth > el.clientWidth; fs--) el.style.fontSize = fs + "px";
     }
     return;

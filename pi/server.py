@@ -603,6 +603,8 @@ def update_leave(cfg):
 #                    "via_school": true, "stop_min": 5, "buffer_min": 0,
 #                    "covers": ["Pre-K Dropoff"],       # calendar leave-by events this replaces
 #                    "home_days": ["Wed"]}              # work from home: drop-off, then back home
+# "morning_trip" can also be a list, one per person. Extra keys: "school": true (the
+# destination is a school: "No school" on break days), "days": ["Mon", "Tue", ...].
 # Leave time = the latest that still makes BOTH targets (work target always met; the
 # drop-off target too, when traffic allows). Skips the stop on no-school days.
 _commute = {}
@@ -613,8 +615,12 @@ def at_today(now, hm):
     return now.replace(hour=h, minute=m, second=0, microsecond=0)
 
 
-def plan_trip(cfg, home, now, off_days):
-    t = cfg["morning_trip"]
+def plan_trip(cfg, home, now, off_days, t=None, key="trip"):
+    t = t or cfg["morning_trip"]
+    if t.get("days") and now.strftime("%a") not in t["days"]:
+        return None
+    if t.get("school") and now.date().isoformat() in off_days:     # the destination itself is a school
+        return {"name": t.get("name", ""), "to": t.get("to_name") or t["to"].split(",")[0], "off": True}
     via = t.get("via")
     skip = bool(via) and t.get("via_school", True) and now.date().isoformat() in off_days
     if now.strftime("%a") in (t.get("home_days") or []):
@@ -650,14 +656,14 @@ def plan_trip(cfg, home, now, off_days):
             lv = min(lv, v) if lv else v
         return lv
 
-    c = _commute.get("trip")
+    c = _commute.get(key)
     if not c or c[0] != (tuple(map(tuple, pts)), now.date()) or time.time() - c[1] > (300 if cfg.get("tomtom_key") else 1800):
         legs, live, free = drive_legs(cfg, pts)
         leave = leave_for(legs)
         if leave > now + timedelta(minutes=10):        # re-ask with predicted traffic for that departure
             legs, live, free = drive_legs(cfg, pts, depart=leave)
             leave = leave_for(legs)
-        _commute["trip"] = c = ((tuple(map(tuple, pts)), now.date()), time.time(), legs, live, free)
+        _commute[key] = c = ((tuple(map(tuple, pts)), now.date()), time.time(), legs, live, free)
     _, _, legs, live, free = c
     leave = leave_for(legs)
     return {"name": t.get("name", ""), "to": t.get("to_name") or t["to"].split(",")[0],
@@ -714,15 +720,18 @@ def update_commute(cfg):
         except Exception as e:
             err = str(e)[:120]
         out.append(row)
-    trip = None
-    if cfg.get("morning_trip"):
+    mt = cfg.get("morning_trip") or []
+    trips = []
+    for i, t in enumerate(mt if isinstance(mt, list) else [mt]):     # one trip, or one per person
         try:
-            trip = plan_trip(cfg, home, now, off)
+            p = plan_trip(cfg, home, now, off, t, f"trip{i}")
+            if p:
+                trips.append(p)
         except Exception as e:
             err = str(e)[:120]
     live = live and not _tomtom["error"]
-    write_json("commute.json", {"show": bool(out or trip), "live": live, "updated": now.isoformat(timespec="minutes"),
-                                "trip": trip, "routes": out, "error": err or _tomtom["error"]})
+    write_json("commute.json", {"show": bool(out or trips), "live": live, "updated": now.isoformat(timespec="minutes"),
+                                "trips": trips, "routes": out, "error": err or _tomtom["error"]})
 
 
 # ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
