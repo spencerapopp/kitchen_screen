@@ -66,17 +66,18 @@ def main():
         add(MEH, "today's word", f"{w['word'][0]} {w['word'][1]} ({w['label']}), {w.get('words_left')} new words left")
 
     add(OK if cfg.get("home_address") else BAD, "home address", "set" if cfg.get("home_address") else "MISSING: no drive times")
-    add(OK if cfg.get("commute") else BAD, "commute places",
+    add(OK if cfg.get("commute") or cfg.get("morning_trip") else BAD, "commute places",
         ", ".join(c.get("name", "?") for c in cfg.get("commute") or []) or "MISSING: no morning commute strip")
     add(OK if cfg.get("tomtom_key") else MEH, "live traffic", "TomTom key set" if cfg.get("tomtom_key") else "no key: usual drive times only")
-    mt = cfg.get("morning_trip")
-    add(OK if mt else MEH, "morning trip",
+    mts = cfg.get("morning_trip") or []
+    mts = mts if isinstance(mts, list) else [mts]
+    add(OK if mts else MEH, "morning trip", "; ".join(
         f"{mt.get('name', '')}: {mt.get('via_name', '') + ' (by ' + mt.get('via_by', '') + ') -> ' if mt.get('via') else ''}"
-        f"{mt.get('to_name', 'work')} by {mt.get('by', '08:30')}" if mt else "not set (leave-by time for drop-off + work)")
+        f"{mt.get('to_name', 'work')} by {mt.get('by', '08:30')}" for mt in mts) or "not set (leave-by time for drop-off + work)")
     c, m = data("commute.json")
     add(BAD if (c or {}).get("error") else MEH, "commute strip",
         f"{'showing' if (c or {}).get('show') else 'hidden (shows Mon-Fri ' + '-'.join(cfg.get('commute_hours') or ['06:30', '09:30']) + ')'}"
-        + (f" | leave {c['trip']['leave'][11:16]}" if (c or {}).get("trip") else "")
+        + "".join(f" | {t['name']} leave {t['leave'][11:16]}" for t in (c or {}).get("trips") or [] if t.get("leave"))
         + (f" | {c['error']}" if (c or {}).get("error") else ""))
     lv, m = data("leave.json")
     trips = (lv or {}).get("trips") or []
