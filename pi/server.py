@@ -501,16 +501,25 @@ def countdown_candidates(cfg, today):
             d = fn(y)
             if d and 0 <= (d - today).days <= window:
                 out.append({"label": name, "icon": icon, "kind": "holiday", "days": (d - today).days})
-    for who, md in (cfg.get("birthdays") or {}).items():
+    for who, v in (cfg.get("birthdays") or {}).items():
+        b = v if isinstance(v, dict) else {"date": v}     # "YYYY-MM-DD" / "MM-DD", or {"date", "label", "today"}
+        parts = b.get("date", "").split("-")
         try:
-            m, dd = map(int, md.split("-")[-2:])
+            born = int(parts[0]) if len(parts) == 3 else None
+            m, dd = map(int, parts[-2:])
             d = date(today.year, m, dd)
             if d < today:
                 d = date(today.year + 1, m, dd)
         except ValueError:
             continue
-        if (d - today).days <= 45:
-            out.append({"label": f"{who}'s birthday", "icon": "gift", "kind": "birthday", "days": (d - today).days})
+        if (d - today).days > 45:
+            continue
+        age = d.year - born if born else None
+        kid = age is not None and age < 18
+        nth = lambda n: f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+        out.append({"label": b.get("label") or (f"{who} turns {age}" if kid else f"{who}'s birthday"),
+                    "today": b.get("today") or (f"Happy {nth(age)} birthday, {who}!" if kid else f"Happy birthday, {who}!"),
+                    "icon": "gift", "kind": "birthday", "days": (d - today).days})
     seen = set()
     for ev in sorted(_events, key=lambda e: e["start"]):
         title = re.sub(r"[^\w&'’\-–—,. ]+", "", ev["title"]).strip(" -–—")

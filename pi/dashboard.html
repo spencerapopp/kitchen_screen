@@ -426,11 +426,10 @@ function tripCard(m, now) {
 function renderCountdown(b) {
   if (!count.show || count.date !== ymd(new Date())) { b.className = "block"; return; }
   const [color, paths] = COUNT_ICON[count.icon] || COUNT_ICON.star;
-  const who = count.kind === "birthday" ? count.label.replace(/'s birthday$/, "") : "";
   let lbl = count.label, big;
   if (count.days === 0) {
     lbl = "Today";
-    big = count.kind === "birthday" ? `Happy birthday, <b>${esc(who)}</b>!` : count.kind === "trip" ? `<b>${esc(count.label)}</b>` : `Happy <b>${esc(count.label)}</b>!`;
+    big = count.today ? `<b>${esc(count.today)}</b>` : count.kind === "trip" ? `<b>${esc(count.label)}</b>` : `Happy <b>${esc(count.label)}</b>!`;
   } else if (count.days === 1) big = "<b>Tomorrow!</b>";
   else big = `<b>${count.days}</b> days to go`;
   b.className = "block show count";
