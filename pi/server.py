@@ -965,7 +965,10 @@ _eta = {}
 def update_eta(cfg):
     e = cfg.get("eta") or {}
     now = datetime.now(TZ)
-    hide = lambda why=None: write_json("eta.json", {"show": False, "why": why})
+    def hide(why=None):
+        if write_json("eta.json", {"show": False, "why": why}) and _eta.get("shown"):
+            log(f"eta: banner off ({why or 'outside hours'})")
+            _eta["shown"] = False
     if not e.get("token"):
         return hide()
     if now.strftime("%a") not in (e.get("days") or ["Mon", "Tue", "Wed", "Thu", "Fri"]):
@@ -992,6 +995,9 @@ def update_eta(cfg):
     eta = fixed + timedelta(minutes=_eta["mins"])
     if now > eta + timedelta(minutes=30):
         return hide("stopped somewhere")              # no news for a while: don't guess
+    if not _eta.get("shown"):
+        log(f"eta: banner on (left work {datetime.fromtimestamp(w['left_work'], TZ):%H:%M}, home ~{eta:%H:%M})")
+        _eta["shown"] = True
     write_json("eta.json", {"show": True, "name": e.get("name", ""), "eta": eta.isoformat(timespec="minutes"),
                             "minutes": _eta["mins"], "fix": fixed.isoformat(timespec="minutes"),
                             "left": datetime.fromtimestamp(w["left_work"], TZ).isoformat(timespec="minutes"),
