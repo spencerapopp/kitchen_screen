@@ -113,7 +113,8 @@
   #banner .cm.bad .m{color:#F28B82;}        #banner .cm.bad .d{color:#F28B82;}
   #banner .cm.off .m{font-size:22px;color:var(--dim);padding:6px 0 5px;}
   /* morning trip with a leave-by time (drop-off on the way to work) */
-  #banner .cm.trip{flex:2.3;}
+  #banner .cm.trip{flex:2.8;}
+  #banner .cm.trip .d{overflow:hidden;}
   #banner .cm.trip .m{font-size:32px;white-space:nowrap;}
   #banner .cm.trip .m b{font-weight:400;color:var(--bay);}
   #banner .cm.trip .d{color:var(--muted);font-size:16px;}
@@ -341,24 +342,22 @@ const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-d
 // "Leave 7:42 · Pre-K 7:50 · SHQ 8:28": leaving later than the leave time pushes the arrivals out.
 function tripCard(m, now) {
   const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
-  const leave = new Date(m.leave), by = new Date(m.by);
+  const leave = new Date(m.leave), by = m.by ? new Date(m.by) : null;
   const mins = Math.ceil((leave - now) / 60000);
   const go = Math.max(+now, +leave);
   const atVia = m.via ? new Date(go + m.legs[0] * 60000) : null;
   const atTo = new Date(go + (m.legs.reduce((a, x) => a + x, 0) + (m.stop_min || 0)) * 60000);
-  const late = atTo > by;
   const viaLate = atVia && m.via_by && atVia > new Date(m.via_by);
+  const late = by ? atTo > by : !!viaLate;                    // work-from-home day: only drop-off time counts
   let state = "", big;
   if (mins > 15) big = `Leave <b>${clock(leave)}</b>`;
   else if (mins > 0) { state = "soon"; big = `Leave in <b>${mins} min</b>`; }
   else if (!late) { state = "now"; big = `<b>Leave now</b>`; }
   else { state = "now"; big = `<b>Running late</b>`; }
-  const who = [m.name, m.via ? `${m.via} → ${m.to}` : m.to].filter(Boolean).join(" · ");
+  const who = [m.name, m.live && m.delay >= 4 ? `+${m.delay} min traffic` : m.live ? "live traffic" : ""].filter(Boolean).join(" · ");
   const parts = [];
   if (m.via) parts.push(`<span class="${viaLate ? "late" : ""}">${esc(m.via)} ${clock(atVia)}</span>`);
-  else if (m.skipped) parts.push(`No ${esc(m.skipped)}`);
-  parts.push(`<span class="${late ? "bad" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
-  if (m.live && m.delay >= 4) parts.push(`<span class="late">+${m.delay} traffic</span>`);
+  parts.push(`<span class="${by && late ? "bad" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
   return { state: late && mins <= 0 ? "now" : state,
            html: `<div class="cm trip ${state}${late ? " bad" : ""}"><div class="n">${esc(who)}</div>` +
                  `<div class="m">${big}</div><div class="d">${parts.join(" · ")}</div></div>` };
@@ -393,6 +392,9 @@ function renderBanner() {
       const d = !r.live ? "usual time" : r.delay >= 1 ? `+${r.delay} traffic` : "clear";
       return `<div class="cm${cls}"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">${r.minutes}<small>min</small></div><div class="d">${d}</div></div>`;
     }).join("");
+    for (const el of b.querySelectorAll(".cm.trip .n, .cm.trip .d, .cm.trip .m")) {   // long names shrink to fit
+      for (let fs = parseFloat(getComputedStyle(el).fontSize); fs > 11 && el.scrollWidth > el.clientWidth; fs--) el.style.fontSize = fs + "px";
+    }
     return;
   }
   if (!trip) { b.className = "block"; return; }

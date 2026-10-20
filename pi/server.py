@@ -601,7 +601,8 @@ def update_leave(cfg):
 #   "morning_trip": {"name": "Spencer", "to_name": "SHQ", "to": "<work address>", "by": "08:30",
 #                    "via_name": "Pre-K", "via": "<school address>", "via_by": "08:00",
 #                    "via_school": true, "stop_min": 5, "buffer_min": 0,
-#                    "covers": ["Pre-K Dropoff"]}       # calendar leave-by events this replaces
+#                    "covers": ["Pre-K Dropoff"],       # calendar leave-by events this replaces
+#                    "home_days": ["Wed"]}              # work from home: drop-off, then back home
 # Leave time = the latest that still makes BOTH targets (work target always met; the
 # drop-off target too, when traffic allows). Skips the stop on no-school days.
 _commute = {}
@@ -614,14 +615,24 @@ def at_today(now, hm):
 
 def plan_trip(cfg, home, now, off_days):
     t = cfg["morning_trip"]
-    by = at_today(now, t.get("by", "08:30"))
-    if now > by:
-        return None                                    # already there (or gone): hide
-    work = geocode(cfg, t["to"])
-    if not work:
-        raise ValueError("address not found: " + t["to"])
     via = t.get("via")
     skip = bool(via) and t.get("via_school", True) and now.date().isoformat() in off_days
+    if now.strftime("%a") in (t.get("home_days") or []):
+        # Work-from-home day: drop-off and back home. Only the drop-off time matters.
+        if skip or not via or not t.get("via_by"):
+            return None
+        via_by = at_today(now, t["via_by"])
+        if now > via_by:
+            return None
+        t = {**t, "to_name": "Home", "by": None}
+        work, by = home, None
+    else:
+        by = at_today(now, t.get("by", "08:30"))
+        if now > by:
+            return None                                # already there (or gone): hide
+        work = geocode(cfg, t["to"])
+        if not work:
+            raise ValueError("address not found: " + t["to"])
     stop = None
     if via and not skip:
         stop = geocode(cfg, via)
@@ -633,9 +644,10 @@ def plan_trip(cfg, home, now, off_days):
     via_by = at_today(now, t["via_by"]) if stop and t.get("via_by") else None
 
     def leave_for(legs):
-        lv = by - timedelta(minutes=sum(legs) + dwell + buf)
+        lv = by - timedelta(minutes=sum(legs) + dwell + buf) if by else None
         if via_by:
-            lv = min(lv, via_by - timedelta(minutes=legs[0]))
+            v = via_by - timedelta(minutes=legs[0])
+            lv = min(lv, v) if lv else v
         return lv
 
     c = _commute.get("trip")
@@ -649,7 +661,7 @@ def plan_trip(cfg, home, now, off_days):
     _, _, legs, live, free = c
     leave = leave_for(legs)
     return {"name": t.get("name", ""), "to": t.get("to_name") or t["to"].split(",")[0],
-            "by": by.isoformat(timespec="minutes"), "leave": leave.isoformat(timespec="minutes"),
+            "by": by.isoformat(timespec="minutes") if by else None, "leave": leave.isoformat(timespec="minutes"),
             "via": (t.get("via_name") or via.split(",")[0]) if stop else None,
             "via_by": via_by.isoformat(timespec="minutes") if via_by else None,
             "skipped": (t.get("via_name") or "stop") if skip else None,
