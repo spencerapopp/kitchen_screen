@@ -112,6 +112,17 @@
   #banner .cm.slow .m{color:var(--peach);}  #banner .cm.slow .d{color:var(--peach);}
   #banner .cm.bad .m{color:#F28B82;}        #banner .cm.bad .d{color:#F28B82;}
   #banner .cm.off .m{font-size:22px;color:var(--dim);padding:6px 0 5px;}
+  /* morning trip with a leave-by time (drop-off on the way to work) */
+  #banner .cm.trip{flex:2.3;}
+  #banner .cm.trip .m{font-size:32px;white-space:nowrap;}
+  #banner .cm.trip .m b{font-weight:400;color:var(--bay);}
+  #banner .cm.trip .d{color:var(--muted);font-size:16px;}
+  #banner .cm.trip .d .late{color:var(--peach);}
+  #banner .cm.trip.soon .m b{color:var(--peach);}
+  #banner .cm.trip.now .m b{color:var(--peach);font-weight:500;}
+  #banner .cm.trip.bad .m b, #banner .cm.trip .d .bad{color:#F28B82;}
+  #banner.commute.soon{border-color:rgba(242,185,138,.6);background:rgba(242,185,138,.10);}
+  #banner.commute.now{border-color:var(--peach);background:rgba(242,185,138,.2);}
 
   #status{position:absolute;right:52px;bottom:8px;font-size:13px;color:var(--dim);opacity:.7;}
 </style>
@@ -327,6 +338,32 @@ const CAR = '<svg viewBox="0 0 24 24"><path d="M5 16V11.5l1.7-4.3A2 2 0 0 1 8.6 
 const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 let alerts = [], trips = [], commute = { show: false };
 const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+// "Leave 7:42 · Pre-K 7:50 · SHQ 8:28": leaving later than the leave time pushes the arrivals out.
+function tripCard(m, now) {
+  const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
+  const leave = new Date(m.leave), by = new Date(m.by);
+  const mins = Math.ceil((leave - now) / 60000);
+  const go = Math.max(+now, +leave);
+  const atVia = m.via ? new Date(go + m.legs[0] * 60000) : null;
+  const atTo = new Date(go + (m.legs.reduce((a, x) => a + x, 0) + (m.stop_min || 0)) * 60000);
+  const late = atTo > by;
+  const viaLate = atVia && m.via_by && atVia > new Date(m.via_by);
+  let state = "", big;
+  if (mins > 15) big = `Leave <b>${clock(leave)}</b>`;
+  else if (mins > 0) { state = "soon"; big = `Leave in <b>${mins} min</b>`; }
+  else if (!late) { state = "now"; big = `<b>Leave now</b>`; }
+  else { state = "now"; big = `<b>Running late</b>`; }
+  const who = [m.name, m.via ? `${m.via} → ${m.to}` : m.to].filter(Boolean).join(" · ");
+  const parts = [];
+  if (m.via) parts.push(`<span class="${viaLate ? "late" : ""}">${esc(m.via)} ${clock(atVia)}</span>`);
+  else if (m.skipped) parts.push(`No ${esc(m.skipped)}`);
+  parts.push(`<span class="${late ? "bad" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
+  if (m.live && m.delay >= 4) parts.push(`<span class="late">+${m.delay} traffic</span>`);
+  return { state: late && mins <= 0 ? "now" : state,
+           html: `<div class="cm trip ${state}${late ? " bad" : ""}"><div class="n">${esc(who)}</div>` +
+                 `<div class="m">${big}</div><div class="d">${parts.join(" · ")}</div></div>` };
+}
+
 function renderBanner() {
   const b = document.getElementById("banner");
   const a = alerts[0];
@@ -340,13 +377,16 @@ function renderBanner() {
     return;
   }
   const t = new Date();
-  const trip = trips.find(x => new Date(x.start) > t);
+  const mt = commute.show ? commute.trip : null;
+  const covered = new Set((mt && mt.covers) || []);           // e.g. "Pre-K Dropoff": the trip card covers it
+  const trip = trips.find(x => new Date(x.start) > t && !covered.has(x.title));
   const tripMins = trip ? Math.round((new Date(trip.leave) - t) / 60000) : Infinity;
   // Weekday mornings: drive times to the usual places, unless a "leave" is due within 15 minutes.
-  if (commute.show && (commute.routes || []).length && tripMins > 15) {
-    b.className = "block show commute";
-    b.style.setProperty("--ic", "var(--bay)");
-    b.innerHTML = CAR + commute.routes.map(r => {
+  if (commute.show && ((commute.routes || []).length || mt) && tripMins > 15) {
+    const tc = mt ? tripCard(mt, t) : null;
+    b.className = "block show commute" + (tc ? " " + tc.state : "");
+    b.style.setProperty("--ic", tc && tc.state ? "var(--peach)" : "var(--bay)");
+    b.innerHTML = CAR + (tc ? tc.html : "") + (commute.routes || []).map(r => {
       if (r.off) return `<div class="cm off"><div class="n${r.name.length > 9 ? " long" : ""}">${esc(r.name)}</div><div class="m">No school</div><div class="d">&nbsp;</div></div>`;
       if (r.minutes == null) return `<div class="cm"><div class="n">${esc(r.name)}</div><div class="m">–</div><div class="d">&nbsp;</div></div>`;
       const cls = !r.live ? "" : r.delay >= 10 ? " bad" : r.delay >= 4 ? " slow" : "";

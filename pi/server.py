@@ -506,6 +506,33 @@ def drive_route(cfg, a, b):
     return m, False, m
 
 
+
+def drive_legs(cfg, pts, depart=None):
+    """Minutes for each leg of home -> stop -> ... with traffic. depart: a future datetime (TomTom
+    predicts traffic for then). Returns (leg minutes, live?, total minutes with no traffic)."""
+    key = cfg.get("tomtom_key")
+    if key:
+        try:
+            when = ""
+            if depart and depart > datetime.now(TZ) + timedelta(minutes=2):
+                when = "&departAt=" + urllib.parse.quote(depart.isoformat(timespec="seconds"))
+            path = ":".join(f"{a},{b}" for a, b in pts)
+            r = json.loads(http(f"https://api.tomtom.com/routing/1/calculateRoute/{path}/json"
+                                f"?key={key}&traffic=true&travelMode=car&routeType=fastest&computeTravelTimeFor=all{when}"))
+            route = r["routes"][0]
+            legs = [round(l["summary"]["travelTimeInSeconds"] / 60) for l in route["legs"]]
+            sm = route["summary"]
+            _tomtom["error"] = None
+            return legs, True, round(sm.get("noTrafficTravelTimeInSeconds", sm["travelTimeInSeconds"]) / 60)
+        except Exception as e:
+            _tomtom["error"] = tomtom_problem(e)
+            log(_tomtom["error"])
+    path = ";".join(f"{b},{a}" for a, b in pts)
+    r = json.loads(http(f"https://router.project-osrm.org/route/v1/driving/{path}?overview=false",
+                        headers={"User-Agent": "kitchen-screen (family dashboard)"}))
+    legs = [round(l["duration"] / 60 * 1.2) for l in r["routes"][0]["legs"]]
+    return legs, False, sum(legs)
+
 NO_SCHOOL = re.compile(r"no school|holiday|school closed|\bclosed\b|\bbreak\b|teacher (work|in-?service)|day off", re.I)
 
 
@@ -569,7 +596,65 @@ def update_leave(cfg):
 #   "commute": [{"name": "Pre-K", "to": "<address>", "school": true}, {"name": "Work", "to": "<address>"}],
 #   "commute_hours": ["06:30", "09:30"]          (Monday–Friday)
 # "school": true shows "No school" on days the calendar marks as a break/holiday.
+#
+# Optional chained trip with a leave-by time (drop-off on the way to work):
+#   "morning_trip": {"name": "Spencer", "to_name": "SHQ", "to": "<work address>", "by": "08:30",
+#                    "via_name": "Pre-K", "via": "<school address>", "via_by": "08:00",
+#                    "via_school": true, "stop_min": 5, "buffer_min": 0,
+#                    "covers": ["Pre-K Dropoff"]}       # calendar leave-by events this replaces
+# Leave time = the latest that still makes BOTH targets (work target always met; the
+# drop-off target too, when traffic allows). Skips the stop on no-school days.
 _commute = {}
+
+
+def at_today(now, hm):
+    h, m = map(int, hm.split(":"))
+    return now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+
+def plan_trip(cfg, home, now, off_days):
+    t = cfg["morning_trip"]
+    by = at_today(now, t.get("by", "08:30"))
+    if now > by:
+        return None                                    # already there (or gone): hide
+    work = geocode(cfg, t["to"])
+    if not work:
+        raise ValueError("address not found: " + t["to"])
+    via = t.get("via")
+    skip = bool(via) and t.get("via_school", True) and now.date().isoformat() in off_days
+    stop = None
+    if via and not skip:
+        stop = geocode(cfg, via)
+        if not stop:
+            raise ValueError("address not found: " + via)
+    pts = [home, stop, work] if stop else [home, work]
+    dwell = int(t.get("stop_min", 5)) if stop else 0
+    buf = int(t.get("buffer_min", 0))
+    via_by = at_today(now, t["via_by"]) if stop and t.get("via_by") else None
+
+    def leave_for(legs):
+        lv = by - timedelta(minutes=sum(legs) + dwell + buf)
+        if via_by:
+            lv = min(lv, via_by - timedelta(minutes=legs[0]))
+        return lv
+
+    c = _commute.get("trip")
+    if not c or c[0] != (tuple(map(tuple, pts)), now.date()) or time.time() - c[1] > (300 if cfg.get("tomtom_key") else 1800):
+        legs, live, free = drive_legs(cfg, pts)
+        leave = leave_for(legs)
+        if leave > now + timedelta(minutes=10):        # re-ask with predicted traffic for that departure
+            legs, live, free = drive_legs(cfg, pts, depart=leave)
+            leave = leave_for(legs)
+        _commute["trip"] = c = ((tuple(map(tuple, pts)), now.date()), time.time(), legs, live, free)
+    _, _, legs, live, free = c
+    leave = leave_for(legs)
+    return {"name": t.get("name", ""), "to": t.get("to_name") or t["to"].split(",")[0],
+            "by": by.isoformat(timespec="minutes"), "leave": leave.isoformat(timespec="minutes"),
+            "via": (t.get("via_name") or via.split(",")[0]) if stop else None,
+            "via_by": via_by.isoformat(timespec="minutes") if via_by else None,
+            "skipped": (t.get("via_name") or "stop") if skip else None,
+            "legs": legs, "stop_min": dwell, "minutes": sum(legs), "typical": free,
+            "delay": max(0, sum(legs) - free), "live": live, "covers": t.get("covers") or []}
 
 
 def in_commute_window(cfg, now):
@@ -583,7 +668,7 @@ def in_commute_window(cfg, now):
 def update_commute(cfg):
     dests = cfg.get("commute") or []
     now = datetime.now(TZ)
-    if not dests or not in_commute_window(cfg, now):
+    if not (dests or cfg.get("morning_trip")) or not in_commute_window(cfg, now):
         write_json("commute.json", {"show": False})
         return
     home_q = cfg.get("home_address")
@@ -594,7 +679,7 @@ def update_commute(cfg):
     if not home:
         write_json("commute.json", {"show": False, "error": "home address not found by the map service"})
         return
-    off = no_school_days() if any(d.get("school") for d in dests) else set()
+    off = no_school_days()
     today = now.date().isoformat()
     live = bool(cfg.get("tomtom_key"))
     out, err = [], None
@@ -617,9 +702,15 @@ def update_commute(cfg):
         except Exception as e:
             err = str(e)[:120]
         out.append(row)
+    trip = None
+    if cfg.get("morning_trip"):
+        try:
+            trip = plan_trip(cfg, home, now, off)
+        except Exception as e:
+            err = str(e)[:120]
     live = live and not _tomtom["error"]
-    write_json("commute.json", {"show": True, "live": live, "updated": now.isoformat(timespec="minutes"),
-                                "routes": out, "error": err or _tomtom["error"]})
+    write_json("commute.json", {"show": bool(out or trip), "live": live, "updated": now.isoformat(timespec="minutes"),
+                                "trip": trip, "routes": out, "error": err or _tomtom["error"]})
 
 
 # ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
