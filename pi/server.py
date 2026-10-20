@@ -734,6 +734,107 @@ def update_commute(cfg):
                                 "trips": trips, "routes": out, "error": err or _tomtom["error"]})
 
 
+# ── "Spencer is on his way home": ETA from his phone (OwnTracks app over Tailscale) ──
+# The phone posts its location to /owntracks/<token> (exposed to his own devices only, via
+# `tailscale serve`; set up by eta_setup.py). The location itself is kept in a private file,
+# never in the dashboard's data folder; the screen only gets the ETA.
+# config.json:
+#   "eta": {"name": "Spencer", "token": "...", "work": "<work address>",
+#           "hours": ["15:00", "21:00"], "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+#           "work_radius_m": 400, "home_radius_m": 250, "work_region": "Work"}
+WHERE = os.path.join(os.path.dirname(CONFIG), "where.json")
+_where_lock = threading.Lock()
+
+
+def meters(a, b):
+    from math import asin, cos, radians, sin, sqrt
+    la1, lo1, la2, lo2 = map(radians, (a[0], a[1], b[0], b[1]))
+    h = sin((la2 - la1) / 2) ** 2 + cos(la1) * cos(la2) * sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371000 * asin(sqrt(h))
+
+
+def load_where():
+    try:
+        with open(WHERE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def owntracks_post(cfg, msg):
+    """One message from the OwnTracks app: a location fix or a region enter/leave."""
+    e = cfg.get("eta") or {}
+    kind = msg.get("_type")
+    if kind not in ("location", "transition") or "lat" not in msg:
+        return
+    tst = int(msg.get("tst") or time.time())
+    pt = [float(msg["lat"]), float(msg["lon"])]
+    with _where_lock:
+        w = load_where()
+        today = datetime.fromtimestamp(tst, TZ).date().isoformat()
+        if w.get("date") != today:
+            w = {"date": today}
+        if tst >= (w.get("fix") or {}).get("tst", 0):
+            w["fix"] = {"lat": pt[0], "lon": pt[1], "tst": tst, "acc": msg.get("acc")}
+        region = (e.get("work_region") or "Work").lower()
+        work = geocode(cfg, e["work"]) if e.get("work") else None
+        at_work = (work and meters(pt, work) <= int(e.get("work_radius_m", 400))) or \
+                  region in [r.lower() for r in msg.get("inregions") or []]
+        if kind == "transition" and (msg.get("desc") or "").lower() == region:
+            at_work = msg.get("event") == "enter"
+            if not at_work:
+                w["left_work"] = tst
+        if at_work:
+            w["at_work"] = tst
+        elif w.get("at_work") and w.get("left_work", 0) < w["at_work"]:
+            w["left_work"] = tst                       # first fix away from work since being there
+        os.makedirs(os.path.dirname(WHERE), exist_ok=True)
+        tmp = WHERE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(w, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, WHERE)
+
+
+_eta = {}
+
+
+def update_eta(cfg):
+    e = cfg.get("eta") or {}
+    now = datetime.now(TZ)
+    hide = lambda why=None: write_json("eta.json", {"show": False, "why": why})
+    if not e.get("token"):
+        return hide()
+    if now.strftime("%a") not in (e.get("days") or ["Mon", "Tue", "Wed", "Thu", "Fri"]):
+        return hide()
+    a, b = (e.get("hours") or ["15:00", "21:00"])[:2]
+    if not (a <= now.strftime("%H:%M") < b):
+        return hide()
+    w = load_where()
+    fix = w.get("fix")
+    if w.get("date") != now.date().isoformat() or not fix or not w.get("at_work"):
+        return hide("not at work today")
+    if w.get("left_work", 0) < w["at_work"] or fix["tst"] < w.get("left_work", 0):
+        return hide("still at work")
+    home = geocode(cfg, cfg.get("home_address", ""))
+    if not home:
+        return hide("home address not found")
+    pt = [fix["lat"], fix["lon"]]
+    if meters(pt, home) <= int(e.get("home_radius_m", 250)):
+        return hide("home")
+    if _eta.get("tst") != fix["tst"] or time.time() - _eta.get("at", 0) > 300:
+        mins, live, free = drive_route(cfg, pt, home)
+        _eta.update(tst=fix["tst"], at=time.time(), mins=mins, live=live, free=free)
+    fixed = datetime.fromtimestamp(fix["tst"], TZ)
+    eta = fixed + timedelta(minutes=_eta["mins"])
+    if now > eta + timedelta(minutes=30):
+        return hide("stopped somewhere")              # no news for a while: don't guess
+    write_json("eta.json", {"show": True, "name": e.get("name", ""), "eta": eta.isoformat(timespec="minutes"),
+                            "minutes": _eta["mins"], "fix": fixed.isoformat(timespec="minutes"),
+                            "left": datetime.fromtimestamp(w["left_work"], TZ).isoformat(timespec="minutes"),
+                            "delay": max(0, _eta["mins"] - _eta["free"]), "live": _eta["live"]})
+
+
 # ── Google Keep: shared Family List + Olivia's quotes (see keep_source.py) ──
 _quotes = {"keep": None}
 
@@ -860,6 +961,27 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def do_POST(self):
+        """OwnTracks: POST /owntracks/<token> (JSON). Answers [] as the app expects."""
+        parts = [x for x in urllib.parse.urlparse(self.path).path.split("/") if x]
+        token = (load_config().get("eta") or {}).get("token")
+        if not token or parts != ["owntracks", token]:
+            self.send_error(404)
+            return
+        try:
+            n = min(int(self.headers.get("Content-Length") or 0), 100_000)
+            msg = json.loads(self.rfile.read(n) or b"{}")
+            for m in msg if isinstance(msg, list) else [msg]:
+                owntracks_post(load_config(), m)
+        except Exception as e:
+            log("owntracks:", e)
+        body = b"[]"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
 def main():
     os.makedirs(PHOTOS, exist_ok=True)
@@ -873,6 +995,7 @@ def main():
     every(60, update_quote)         # Olivia quote of the day: new quotes first
     every(60, update_word)          # word of the day: picked once a day, logged so it never repeats
     every(60, update_commute)       # weekday-morning commute: re-routed every 5 min (TomTom) / 30 min
+    every(30, update_eta)           # on the way home: ETA from the phone's location, if set up
     cfg = load_config()
     # "bind": "0.0.0.0" lets other machines on the home network load the dashboard (e.g. when
     # this server runs on mrpopp and the Pi only displays it). Default: this machine only.

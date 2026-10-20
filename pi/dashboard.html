@@ -351,7 +351,7 @@ function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]
 // ── banner: severe weather, else "leave by" ──
 const CAR = '<svg viewBox="0 0 24 24"><path d="M5 16V11.5l1.7-4.3A2 2 0 0 1 8.6 6h6.8a2 2 0 0 1 1.9 1.2L19 11.5V16M5 16h14M5 16v2M19 16v2M5 11.5h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="13.8" r="1" fill="currentColor"/><circle cx="16" cy="13.8" r="1" fill="currentColor"/></svg>';
 const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
-let alerts = [], trips = [], commute = { show: false };
+let alerts = [], trips = [], commute = { show: false }, eta = { show: false };
 const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 // "Leave 7:42 · Pre-K 7:50 · SHQ 8:28": leaving later than the leave time pushes the arrivals out.
 function tripCard(m, now) {
@@ -399,6 +399,19 @@ function renderBanner() {
   const covered = new Set(mts.flatMap(m => m.covers || []));  // e.g. "Pre-K Dropoff": the trip card covers it
   const trip = trips.find(x => new Date(x.start) > t && !covered.has(x.title));
   const tripMins = trip ? Math.round((new Date(trip.leave) - t) / 60000) : Infinity;
+  // On the way home (from the phone's location), unless a "leave" is due within 15 minutes.
+  if (eta.show && tripMins > 15) {
+    const short = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
+    const at = new Date(eta.eta), left = Math.round((at - t) / 60000);
+    const big = left <= 2 ? "<b>Almost home</b>" : `Home <b>~${short(at)}</b>`;
+    const away = left > 2 ? `${left} min away` : "pulling in";
+    const traffic = eta.live && eta.delay >= 4 ? ` · +${eta.delay} traffic` : "";
+    b.className = "block show";
+    b.style.setProperty("--ic", "var(--bay)");
+    b.innerHTML = `${CAR}<div class="txt"><div class="small">${esc(eta.name)} · left work ${short(new Date(eta.left))}</div>` +
+      `<div class="big">${big}</div><div class="small">${away}${traffic}</div></div>`;
+    return;
+  }
   // Weekday mornings: drive times to the usual places, unless a "leave" is due within 15 minutes.
   if (commute.show && ((commute.routes || []).length || mts.length) && tripMins > 15) {
     const tcs = mts.map(m => tripCard(m, t));
@@ -431,6 +444,7 @@ async function loadBanner() {
   try { alerts = (await getJSON(DATA + "alerts.json")).alerts || []; } catch (e) { alerts = []; }
   try { trips = (await getJSON(DATA + "leave.json")).trips || []; } catch (e) { trips = []; }
   try { commute = await getJSON(DATA + "commute.json"); setStatus("commute", commute.error); } catch (e) { commute = { show: false }; }
+  try { eta = await getJSON(DATA + "eta.json"); } catch (e) { eta = { show: false }; }
   try { setStatus("words", (await getJSON(DATA + "word.json")).warning); } catch (e) { /* not picked yet */ }
   renderBanner();
 }

@@ -84,6 +84,11 @@ def main():
     add(BAD if (lv or {}).get("error") else MEH, "leave-by banner",
         (f"next: {trips[0]['title']} leave {trips[0]['leave'][11:16]}" if trips else "nothing within 3 h")
         + (f" | {lv['error']}" if (lv or {}).get("error") else ""))
+    e = cfg.get("eta") or {}
+    wf = os.path.join(HOME, ".config/kitchen/where.json")
+    seen = (time.time() - json.load(open(wf)).get("fix", {}).get("tst", 0)) / 60 if os.path.exists(wf) else None
+    add(OK if e.get("token") and seen is not None else MEH, "phone (OwnTracks)",
+        ("last update " + age(seen)) if e.get("token") else "not set up (pi/eta_setup.py)")
     add(MEH, "leave-by events", ", ".join(cfg.get("leave_titles") or []) or "none (add '#leave' to an event title)")
 
     print(f"\nKitchen screen check — {datetime.now():%a %b %d %H:%M}\n")
