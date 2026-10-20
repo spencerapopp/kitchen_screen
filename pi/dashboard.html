@@ -307,12 +307,12 @@ async function loadTasks() {
     const t = await getJSON(DATA + "tasks.json");
     if (t.title) document.getElementById("todoTitle").textContent = t.title;
     const items = t.items || [];
+    setStatus("tasks", t.error);                               // clear old errors even when the list didn't change
     if (JSON.stringify(items) === lastTasks) return; lastTasks = JSON.stringify(items);
     const box = document.getElementById("tasks");
     box.innerHTML = items.length ? items.map(x => `<div>${esc(x)}</div>`).join("") : `<div class="empty">All done</div>`;
     const panel = document.getElementById("todo");
     for (let fs = 18; fs > 13 && panel.scrollHeight > panel.clientHeight + 1; fs--) box.style.fontSize = fs - 1 + "px";
-    setStatus("tasks", t.error);
   } catch (e) { setStatus("tasks", "no list data"); }
 }
 
