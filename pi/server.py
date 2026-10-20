@@ -513,8 +513,8 @@ def countdown_candidates(cfg, today):
                 d = date(today.year + 1, m, dd)
         except ValueError:
             continue
-        if (d - today).days > 45:
-            continue
+        if (d - today).days > 45 or (b.get("surprise") and d != today):
+            continue                                   # "surprise": true shows only on the day itself
         age = d.year - born if born else None
         kid = age is not None and age < 18
         nth = lambda n: f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
