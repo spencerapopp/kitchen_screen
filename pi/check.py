@@ -67,7 +67,7 @@ def main():
 
     add(OK if cfg.get("home_address") else BAD, "home address", "set" if cfg.get("home_address") else "MISSING: no drive times")
     add(OK if cfg.get("commute") or cfg.get("morning_trip") else BAD, "commute places",
-        ", ".join(c.get("name", "?") for c in cfg.get("commute") or []) or "MISSING: no morning commute strip")
+        ", ".join(c.get("name", "?") for c in cfg.get("commute") or []) or ("in morning trip" if cfg.get("morning_trip") else "MISSING: no morning commute strip"))
     add(OK if cfg.get("tomtom_key") else MEH, "live traffic", "TomTom key set" if cfg.get("tomtom_key") else "no key: usual drive times only")
     mts = cfg.get("morning_trip") or []
     mts = mts if isinstance(mts, list) else [mts]
