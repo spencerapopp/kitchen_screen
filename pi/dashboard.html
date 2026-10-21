@@ -113,6 +113,7 @@
   #banner.count .txt{flex:0 1 auto;}
   #banner.count .lbl{color:var(--muted);font-size:16px;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   #banner.count .big{font-size:34px;}
+  #banner.count .big.note{font-size:30px;}
   #banner svg{flex:0 0 46px;height:46px;color:var(--ic,var(--bay));}
   #banner .txt{min-width:0;flex:1;}
   #banner .small{color:var(--muted);font-size:19px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -227,6 +228,7 @@ const COUNT_ICON = {   // line icons for the countdown, same style as the rest o
   egg: ["#C58AF9", '<path d="M12 3c3.6 0 6.5 6 6.5 10.5a6.5 6.5 0 0 1-13 0C5.5 9 8.4 3 12 3z"/><path d="M5.8 12.5l2.1-1.5 2 1.5 2.1-1.5 2 1.5 2.1-1.5 2 1.5"/>'],
   star: ["#8AB4F8", '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>'],
   gift: ["#C58AF9", '<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M3.5 9h17M12 9v11M12 9c-1.4-3.5-5.6-4-5.6-1.4S10 9 12 9zM12 9c1.4-3.5 5.6-4 5.6-1.4S14 9 12 9z"/>'],
+  book: ["#81C995", '<path d="M3.5 5.5c2.8-1.6 5.8-1.6 8.5.5 2.7-2.1 5.7-2.1 8.5-.5v13c-2.8-1.6-5.8-1.6-8.5.5-2.7-2.1-5.7-2.1-8.5-.5z"/><path d="M12 6v13.5"/>'],
   plane: ["#8AB4F8", '<path d="M12 2.5c.8 0 1.5.7 1.5 1.5v5.8l7.5 4.4v2l-7.5-2.3v4.3l2.2 1.6v1.5L12 20.5l-3.7.8v-1.5l2.2-1.6v-4.3L3 16.2v-2l7.5-4.4V4c0-.8.7-1.5 1.5-1.5z"/>'],
 };
 const ICON = {
@@ -271,6 +273,7 @@ function fmtTime(d) {
   return (h % 12 || 12) + (m ? ":" + String(m).padStart(2, "0") : "") + (h < 12 ? "a" : "p");
 }
 // Shorter titles so more fits in a day box. Add your own [pattern, replacement] pairs here.
+const NOTE_TITLE = /^\s*pre-?k this week\s*[:\-\u2013]/i;
 const SHORTEN = [
   [/^Pre-?K this week:\s*/i, "Pre-K: "],            // "Pre-K this week: Letter N, ..." -> "Pre-K: Letter N, ..."
   [/\s*\(Pre-?K dress-?up\)/i, ""],                 // "Wacky Wednesday (Pre-K dress-up)" -> "Wacky Wednesday"
@@ -298,6 +301,7 @@ function renderCalendar() {
   const byDay = {}, spans = [];
   for (const ev of events) {
     if (ev.hidden) continue;                       // "#leave" events only power the leave-by banner
+    if (ev.allDay && NOTE_TITLE.test(ev.title)) continue;   // "Pre-K this week: ..." shows as an evening note instead
     if (!ev.allDay && ev.free && !ev.location) continue;   // phone nudges (timed, "Free", no place): not for the wall
     if (ev.allDay) {
       // all-day events cover [start, end) by date
@@ -425,7 +429,7 @@ function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]
 // ── banner: severe weather, else "leave by" ──
 const CAR = '<svg viewBox="0 0 24 24"><path d="M5 16V11.5l1.7-4.3A2 2 0 0 1 8.6 6h6.8a2 2 0 0 1 1.9 1.2L19 11.5V16M5 16h14M5 16v2M19 16v2M5 11.5h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="13.8" r="1" fill="currentColor"/><circle cx="16" cy="13.8" r="1" fill="currentColor"/></svg>';
 const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
-let alerts = [], trips = [], commute = { show: false }, eta = { show: false }, count = { show: false };
+let alerts = [], trips = [], commute = { show: false }, eta = { show: false }, count = { show: false }, note = { show: false };
 const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 // "Leave 7:42 · Pre-K 7:50 · SHQ 8:28": leaving later than the leave time pushes the arrivals out.
 function tripCard(m, now) {
@@ -458,6 +462,16 @@ function tripCard(m, now) {
 
 // "12 days to go · Halloween". Only when the spot is free; anything time-sensitive takes it over.
 function renderCountdown(b) {
+  if (note.show && note.date === ymd(new Date())) {          // weekly school note wins the quiet spot in its window
+    const [color, paths] = COUNT_ICON[note.icon] || COUNT_ICON.book;
+    b.className = "block show count";
+    b.style.setProperty("--ic", color);
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>` +
+      `<div class="txt"><div class="lbl">${esc(note.label)}</div><div class="big note">${esc(note.text)}</div></div>`;
+    const el = b.querySelector(".big");
+    for (let fs = 30; fs > 18 && el.scrollWidth > el.clientWidth; fs--) el.style.fontSize = fs + "px";
+    return;
+  }
   if (!count.show || count.date !== ymd(new Date())) { b.className = "block"; return; }
   const [color, paths] = COUNT_ICON[count.icon] || COUNT_ICON.star;
   let lbl = count.label, big;
@@ -538,6 +552,7 @@ async function loadBanner() {
   try { commute = await getJSON(DATA + "commute.json"); setStatus("commute", commute.error); } catch (e) { commute = { show: false }; }
   try { eta = await getJSON(DATA + "eta.json"); } catch (e) { eta = { show: false }; }
   try { count = await getJSON(DATA + "countdown.json"); } catch (e) { count = { show: false }; }
+  try { note = await getJSON(DATA + "note.json"); } catch (e) { note = { show: false }; }
   try { setStatus("words", (await getJSON(DATA + "word.json")).warning); } catch (e) { /* not picked yet */ }
   renderBanner();
 }

@@ -550,6 +550,30 @@ def pick_countdown(cands, today):
     return main
 
 
+# ── weekly school note: "Pre-K this week: Letter N, ..." stays off the calendar grid and shows
+# as a quiet note in the banner spot, 4-8 PM on the first two days of its week.
+NOTE_TITLE = r"^\s*pre-?k this week\s*[:\-–]\s*"
+
+
+def update_note(cfg):
+    now = datetime.now(TZ)
+    pat = re.compile(cfg.get("note_pattern", NOTE_TITLE), re.I)
+    a, b = (cfg.get("note_hours") or ["16:00", "20:00"])[:2]
+    note = None
+    if a <= now.strftime("%H:%M") < b:
+        today = now.date()
+        for ev in _events:
+            if not ev.get("allDay") or not pat.search(ev["title"]):
+                continue
+            s = date.fromisoformat(ev["start"][:10])
+            e = date.fromisoformat((ev.get("end") or ev["start"])[:10])
+            if s <= today < e and (today - s).days < 2:
+                note = {"show": True, "label": "This week at Pre-K", "text": pat.sub("", ev["title"]).strip(),
+                        "icon": "book", "date": today.isoformat()}
+                break
+    write_json("note.json", note or {"show": False})
+
+
 def update_countdown(cfg):
     if cfg.get("countdown") is False:
         return write_json("countdown.json", {"show": False})
@@ -1179,6 +1203,7 @@ def main():
     every(30, update_eta)           # on the way home: ETA from the phone's location, if set up
     every(60, update_air)           # air quality + pollen: refreshed every 30 minutes
     every(60, update_countdown)     # holiday / birthday / trip countdown: one a day
+    every(60, update_note)          # weekly Pre-K note: 4-8 PM on the first two days of the week
     cfg = load_config()
     # "bind": "0.0.0.0" lets other machines on the home network load the dashboard (e.g. when
     # this server runs on mrpopp and the Pi only displays it). Default: this machine only.
