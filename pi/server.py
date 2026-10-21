@@ -786,7 +786,7 @@ def update_leave(cfg):
 # "school": true shows "No school" on days the calendar marks as a break/holiday.
 #
 # Optional chained trip with a leave-by time (drop-off on the way to work):
-#   "morning_trip": {"name": "Spencer", "to_name": "SHQ", "to": "<work address>", "by": "08:30",
+#   "morning_trip": {"name": "Spencer", "to_name": "SHQ", "to": "<work address>", "by": "08:45", "aim": "08:30",
 #                    "via_name": "Pre-K", "via": "<school address>", "via_by": "08:00",
 #                    "via_school": true, "stop_min": 5, "buffer_min": 0,
 #                    "covers": ["Pre-K Dropoff"],       # calendar leave-by events this replaces
@@ -846,20 +846,22 @@ def plan_trip(cfg, home, now, off_days, t=None, key="trip"):
 
     c = _commute.get(key)
     if not c or c[0] != (tuple(map(tuple, pts)), now.date()) or time.time() - c[1] > (300 if cfg.get("tomtom_key") else 1800):
-        legs, live, free = drive_legs(cfg, pts)
+        legs, live, free = drive_legs(cfg, pts)        # traffic right now: "if you leave now" times
+        now_legs = legs
         leave = leave_for(legs)
         if leave > now + timedelta(minutes=10):        # re-ask with predicted traffic for that departure
             legs, live, free = drive_legs(cfg, pts, depart=leave)
             leave = leave_for(legs)
-        _commute[key] = c = ((tuple(map(tuple, pts)), now.date()), time.time(), legs, live, free)
-    _, _, legs, live, free = c
+        _commute[key] = c = ((tuple(map(tuple, pts)), now.date()), time.time(), legs, live, free, now_legs)
+    _, _, legs, live, free, now_legs = c
     leave = leave_for(legs)
     return {"name": t.get("name", ""), "to": t.get("to_name") or t["to"].split(",")[0],
             "by": by.isoformat(timespec="minutes") if by else None, "leave": leave.isoformat(timespec="minutes"),
             "via": (t.get("via_name") or via.split(",")[0]) if stop else None,
             "via_by": via_by.isoformat(timespec="minutes") if via_by else None,
             "skipped": (t.get("via_name") or "stop") if skip else None,
-            "legs": legs, "stop_min": dwell, "minutes": sum(legs), "typical": free,
+            "aim": at_today(now, t["aim"]).isoformat(timespec="minutes") if by and t.get("aim") else None,
+            "legs": legs, "now_legs": now_legs, "stop_min": dwell, "minutes": sum(legs), "typical": free,
             "delay": max(0, sum(legs) - free), "live": live, "covers": t.get("covers") or []}
 
 

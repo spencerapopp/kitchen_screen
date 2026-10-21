@@ -157,12 +157,15 @@
   #banner .tr + .tr{border-top:1px solid var(--panel-line);}
   #banner .tr .who{flex:0 0 78px;color:var(--muted);font-size:14px;letter-spacing:.12em;text-transform:uppercase;line-height:1.1;}
   #banner .tr .who small{display:block;font-size:11px;letter-spacing:.04em;text-transform:none;color:var(--peach);}
-  #banner .tr .m{flex:0 0 auto;max-width:190px;font-size:27px;font-weight:300;white-space:nowrap;overflow:hidden;color:var(--ink);}
+  #banner .tr .m{flex:0 0 auto;max-width:165px;font-size:27px;font-weight:300;white-space:nowrap;overflow:hidden;color:var(--ink);}
   #banner .tr .m b{font-weight:400;color:var(--bay);}
   #banner .tr.soon .m b, #banner .tr.now .m b{color:var(--peach);}
   #banner .tr.bad .m b, #banner .tr .d .bad{color:#F28B82;}
-  #banner .tr .d{flex:1;min-width:0;font-size:14px;line-height:1.2;color:var(--muted);white-space:nowrap;overflow:hidden;}
+  #banner .tr .d{flex:1;min-width:0;font-size:14px;line-height:1.15;color:var(--muted);white-space:nowrap;overflow:hidden;}
   #banner .tr .d .late{color:var(--peach);}
+  #banner .tr .d .now{color:var(--dim);font-size:10px;letter-spacing:.12em;text-transform:uppercase;line-height:1.3;}
+  #banner .cm.trip .d .now{color:var(--dim);font-size:.9em;}
+  #banner .tr .d .good, #banner .cm.trip .d .good{color:#81C995;}
   #banner .tr.off .m{font-size:22px;color:var(--dim);}
   #banner.commute.soon{border-color:rgba(242,185,138,.6);background:rgba(242,185,138,.10);}
   #banner.commute.now{border-color:var(--peach);background:rgba(242,185,138,.2);}
@@ -438,9 +441,11 @@ function tripCard(m, now) {
   const clock = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
   const leave = new Date(m.leave), by = m.by ? new Date(m.by) : null;
   const mins = Math.ceil((leave - now) / 60000);
-  const go = Math.max(+now, +leave);
-  const atVia = m.via ? new Date(go + m.legs[0] * 60000) : null;
-  const atTo = new Date(go + (m.legs.reduce((a, x) => a + x, 0) + (m.stop_min || 0)) * 60000);
+  // Arrival times are "if you leave right now", with the current traffic.
+  const legs = m.now_legs || m.legs;
+  const atVia = m.via ? new Date(+now + legs[0] * 60000) : null;
+  const atTo = new Date(+now + (legs.reduce((a, x) => a + x, 0) + (m.stop_min || 0)) * 60000);
+  const inWindow = m.aim && atTo >= new Date(m.aim) && atTo <= by;     // e.g. 8:30-8:45 at work
   const viaLate = atVia && m.via_by && atVia > new Date(m.via_by);
   const late = by ? atTo > by : !!viaLate;                    // work-from-home day: only drop-off time counts
   let state = "", big;
@@ -451,13 +456,13 @@ function tripCard(m, now) {
   const who = [m.name, m.live && m.delay >= 4 ? `+${m.delay} min traffic` : m.live ? "live traffic" : ""].filter(Boolean).join(" · ");
   const parts = [];
   if (m.via) parts.push(`<span class="${viaLate ? "late" : ""}">${esc(m.via)} ${clock(atVia)}</span>`);
-  parts.push(`<span class="${by && late ? "bad" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
+  parts.push(`<span class="${by && late ? "bad" : inWindow ? "good" : ""}">${esc(m.to)} ${clock(atTo)}</span>`);
   const tag = m.live && m.delay >= 4 ? `+${m.delay} traffic` : "";
   return { state: late && mins <= 0 ? "now" : state,
            row: `<div class="tr ${state}${late ? " bad" : ""}"><div class="who">${esc(m.name)}${tag ? `<small>${tag}</small>` : ""}</div>` +
-                `<div class="m">${big}</div><div class="d">${parts.join("<br>")}</div></div>`,
+                `<div class="m">${big}</div><div class="d"><div class="now">If you leave now</div>${parts.join("<br>")}</div></div>`,
            html: `<div class="cm trip ${state}${late ? " bad" : ""}"><div class="n">${esc(who)}</div>` +
-                 `<div class="m">${big}</div><div class="d">${parts.join(" · ")}</div></div>` };
+                 `<div class="m">${big}</div><div class="d"><span class="now">Leave now →</span> ${parts.join(" · ")}</div></div>` };
 }
 
 // "12 days to go · Halloween". Only when the spot is free; anything time-sensitive takes it over.
