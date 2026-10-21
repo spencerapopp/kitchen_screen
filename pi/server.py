@@ -139,7 +139,8 @@ def calendar_from_api(cfg):
                 if "dateTime" in st:
                     s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
                     out.append({"title": title, "start": s.isoformat(), "allDay": False,
-                                "location": (ev.get("location") or "").strip(), "color": color})
+                                "location": (ev.get("location") or "").strip(), "color": color,
+                                "free": ev.get("transparency") == "transparent"})
                 elif "date" in st:
                     out.append({"title": title, "start": st["date"], "end": en.get("date") or st["date"], "allDay": True,
                                 "color": color})

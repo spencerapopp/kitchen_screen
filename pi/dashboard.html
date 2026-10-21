@@ -56,6 +56,15 @@
   .dow.today{color:var(--bay);font-weight:500;}
   .day{background:var(--cell);border-radius:10px;padding:8px 9px 0;overflow:hidden;min-width:0;}
   .day.past{opacity:.38;}
+  /* multi-day all-day events (school week, trips): one bar across the days instead of a copy in each */
+  .bar{align-self:start;z-index:1;height:24px;line-height:24px;font-size:16px;margin:0 6px;padding:0 9px;box-sizing:border-box;
+       border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+       background:rgba(242,185,138,0.16);border-left:3px solid var(--peach);color:var(--peach-ink);}
+  .bar.tinted{background:color-mix(in srgb, var(--c) 24%, transparent);border-left-color:var(--c);color:var(--ink);}
+  .bar.cont{border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-4px;}
+  .bar.more{border-top-right-radius:0;border-bottom-right-radius:0;margin-right:-4px;}
+  .bar.past{opacity:.38;}
+  .lanes{flex:none;}
   .day.today{background:rgba(138,180,248,0.14);outline:1.5px solid rgba(138,180,248,0.55);}
   .num{font-size:24px;font-weight:200;line-height:1.1;margin-bottom:2px;}
   .day.today .num{color:var(--bay);font-weight:400;}
@@ -263,6 +272,8 @@ function fmtTime(d) {
 }
 // Shorter titles so more fits in a day box. Add your own [pattern, replacement] pairs here.
 const SHORTEN = [
+  [/^Pre-?K this week:\s*/i, "Pre-K: "],            // "Pre-K this week: Letter N, ..." -> "Pre-K: Letter N, ..."
+  [/\s*\(Pre-?K dress-?up\)/i, ""],                 // "Wacky Wednesday (Pre-K dress-up)" -> "Wacky Wednesday"
   [/^Olivia(?:'|\u2019)?s?\s+/i, ""],              // "Olivia's Swim Lesson" -> "Swim Lesson"
   [/^Plano ISD\s*[-\u2013:]\s*/i, ""],             // "Plano ISD - Fall Break" -> "Fall Break"
   [/\bItty Bitty Bett(?:y|ie)'?s\s*/i, ""],        // "Itty Bitty Bettys Soccer Practice" -> "Soccer Practice"
@@ -284,20 +295,39 @@ const tint = ev => /^#[0-9A-Fa-f]{6}$/.test(ev.color || "") ? ` style="--c:${ev.
 function renderCalendar() {
   const today = now(); today.setHours(0, 0, 0, 0);
   const start = new Date(today); start.setDate(start.getDate() - start.getDay());
-  const byDay = {};
+  const byDay = {}, spans = [];
   for (const ev of events) {
     if (ev.hidden) continue;                       // "#leave" events only power the leave-by banner
+    if (!ev.allDay && ev.free && !ev.location) continue;   // phone nudges (timed, "Free", no place): not for the wall
     if (ev.allDay) {
       // all-day events cover [start, end) by date
       const s = new Date(ev.start + "T00:00"), e = new Date((ev.end || ev.start) + "T00:00");
       if (e <= s) e.setDate(s.getDate() + 1);
+      if (Math.round((e - s) / 864e5) >= 2) { spans.push({ ev, s, e }); continue; }   // drawn as one bar
       for (const d = new Date(s); d < e; d.setDate(d.getDate() + 1)) (byDay[ymd(d)] ||= []).push({ ...ev, sort: -1 });
     } else {
       const s = new Date(ev.start);
       (byDay[ymd(s)] ||= []).push({ ...ev, sort: s.getTime(), time: fmtTime(s) });
     }
   }
-  let html = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((n, i) => `<div class="dow${i === today.getDay() ? " today" : ""}">${n}</div>`).join("");
+  // Multi-day bars: one segment per week row, stacked in lanes; each day they cross keeps room for them.
+  const LANE = 28, DAY = 864e5, segs = [], laneEnds = {}, cellLanes = {};
+  for (const sp of spans.sort((a, b) => a.s - b.s || (b.e - b.s) - (a.e - a.s))) {
+    for (let r = 0; r < WEEKS; r++) {
+      const rs = new Date(start); rs.setDate(start.getDate() + 7 * r);
+      const re = new Date(rs); re.setDate(rs.getDate() + 7);
+      const s = sp.s > rs ? sp.s : rs, e = sp.e < re ? sp.e : re;
+      if (s >= e) continue;
+      const c0 = Math.round((s - rs) / DAY), c1 = Math.round((e - rs) / DAY);
+      const ends = laneEnds[r] ||= [];
+      let lane = ends.findIndex(x => x <= c0);
+      if (lane < 0) { lane = ends.length; ends.push(0); }
+      ends[lane] = c1;
+      for (let c = c0; c < c1; c++) cellLanes[r * 7 + c] = Math.max(cellLanes[r * 7 + c] || 0, lane + 1);
+      segs.push({ ev: sp.ev, r, c0, c1, lane, cont: s > sp.s, more: e < sp.e, past: e <= today });
+    }
+  }
+  let html = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((n, i) => `<div class="dow${i === today.getDay() ? " today" : ""}" style="grid-row:1;grid-column:${i + 1}">${n}</div>`).join("");
   for (let i = 0; i < WEEKS * 7; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const key = ymd(d);
@@ -305,12 +335,16 @@ function renderCalendar() {
     let cls = d < today ? " past" : d.getTime() === today.getTime() ? " today" : "";
     const label = d.getDate() === 1 || i === 0 ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : d.getDate();
     const shown = list;
-    html += `<div class="day${cls}" data-day="${key}"><div class="num">${label}</div>` +
+    const lanes = cellLanes[i] ? `<div class="lanes" style="height:${cellLanes[i] * LANE}px"></div>` : "";
+    html += `<div class="day${cls}" data-day="${key}" style="grid-row:${Math.floor(i / 7) + 2};grid-column:${i % 7 + 1}"><div class="num">${label}</div>${lanes}` +
       shown.map(ev => ev.allDay
         ? `<div class="ev allday${ev.color ? " tinted" : ""}"${tint(ev)}>${esc(shortTitle(ev.title))}</div>`
         : `<div class="ev${ev.color ? " tinted" : ""}"${tint(ev)}><span class="tm">${ev.time}</span> ${esc(shortTitle(ev.title))}</div>`).join("") +
       `</div>`;
   }
+  html += segs.map(g => `<div class="bar${g.ev.color ? " tinted" : ""}${g.cont ? " cont" : ""}${g.more ? " more" : ""}${g.past ? " past" : ""}"` +
+    ` style="grid-row:${g.r + 2};grid-column:${g.c0 + 1}/${g.c1 + 1};margin-top:${38 + g.lane * LANE}px;${g.ev.color && /^#[0-9A-Fa-f]{6}$/.test(g.ev.color) ? `--c:${g.ev.color};` : ""}">` +
+    `${esc(shortTitle(g.ev.title))}</div>`).join("");
   const cal = document.getElementById("cal");
   cal.innerHTML = html;
   // Fit every event in its day with its whole title: shrink the text from 19px down to 11px.
