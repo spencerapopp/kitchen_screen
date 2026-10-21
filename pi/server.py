@@ -387,13 +387,39 @@ def update_photos(cfg):
 
 
 # ── weather (Open-Meteo, free, no key) ─────────────────────────────────────
+def rain_window(hourly, start=50, keep=40, ahead=14):
+    """The next rainy stretch in the coming hours, e.g. {"label": "3–5 PM", "max": 70}, or None.
+    Starts at the first hour with a 50%+ chance and runs while the chance stays 40%+."""
+    times, probs = hourly.get("time") or [], hourly.get("precipitation_probability") or []
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0, tzinfo=None)
+    hrs = [(datetime.fromisoformat(t), p or 0) for t, p in zip(times, probs)]
+    hrs = [(t, p) for t, p in hrs if now <= t < now + timedelta(hours=ahead)]
+    i = next((k for k, (_, p) in enumerate(hrs) if p >= start), None)
+    if i is None:
+        return None
+    j = i
+    while j + 1 < len(hrs) and hrs[j + 1][1] >= keep:
+        j += 1
+    a, b = hrs[i][0], hrs[j][0] + timedelta(hours=1)
+    h = lambda t: f"{t.hour % 12 or 12}"
+    ap = lambda t: "AM" if t.hour < 12 else "PM"
+    if i == 0:
+        label = f"until {h(b)} {ap(b)}" if j + 1 < len(hrs) else "today"
+    elif j + 1 >= len(hrs):
+        label = f"from {h(a)} {ap(a)}"
+    else:
+        label = f"{h(a)}–{h(b)} {ap(b)}" if ap(a) == ap(b) else f"{h(a)} {ap(a)}–{h(b)} {ap(b)}"
+    return {"label": label, "max": max(p for _, p in hrs[i:j + 1])}
+
+
 def update_weather(cfg):
     lat, lng = cfg.get("lat", 33.0198), cfg.get("lng", -96.6989)
     url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
            "&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min"
+           "&hourly=precipitation_probability"
            "&temperature_unit=fahrenheit&timezone=America%%2FChicago&forecast_days=5" % (lat, lng))
     w = json.loads(http(url))
-    if write_json("weather.json", {"current": w["current"], "daily": w["daily"]}):
+    if write_json("weather.json", {"current": w["current"], "daily": w["daily"], "rain": rain_window(w.get("hourly") or {})}):
         log("weather:", round(w["current"]["temperature_2m"]), "F")
 
 

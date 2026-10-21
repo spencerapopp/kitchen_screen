@@ -26,16 +26,21 @@
   #date{margin-top:10px;color:var(--bay);text-transform:uppercase;letter-spacing:.16em;font-size:21px;}
 
   /* weather */
-  #weather{left:1094px;top:32px;width:778px;height:108px;display:flex;align-items:center;justify-content:flex-end;gap:28px;}
-  #wnow{display:flex;flex-direction:column;justify-content:center;padding-right:28px;border-right:1px solid var(--panel-line);height:92px;}
+  #weather{left:1094px;top:28px;width:778px;height:116px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:6px;}
+  #wtop{display:flex;align-items:center;gap:28px;}
+  #wnow{display:flex;flex-direction:column;justify-content:center;padding-right:28px;border-right:1px solid var(--panel-line);height:82px;}
   #wmain{display:flex;align-items:center;gap:14px;}
   #wtemp{font-size:78px;font-weight:200;line-height:1;}
   #wnow svg{width:64px;height:64px;}
   /* air quality + pollen: two small color-coded chips under the temperature */
-  #wnow.air #wtemp{font-size:62px;}
-  #wnow.air svg{width:50px;height:50px;}
-  #air{display:none;gap:6px;margin-top:6px;}
-  #wnow.air #air{display:flex;}
+  #weather.air #wtemp{font-size:70px;}
+  #weather.air #wnow svg{width:54px;height:54px;}
+  #weather.air .wday svg{width:34px;height:34px;margin:3px 0 2px;}
+  #weather.air .wday .d{font-size:17px;} #weather.air .wday .t{font-size:19px;}
+  #air{display:none;gap:8px;justify-content:flex-end;}
+  #weather.air #air{display:flex;}
+  .aq .why{color:var(--muted);font-size:13px;margin-left:2px;}
+  .aq.rain{--c:#8AB4F8;} .aq.rain svg{width:14px;height:14px;color:var(--c);}
   .aq{--c:#81C995;display:flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border-radius:7px;white-space:nowrap;
       background:color-mix(in srgb, var(--c) 16%, transparent);border:1px solid color-mix(in srgb, var(--c) 38%, transparent);}
   .aq i{width:8px;height:8px;border-radius:50%;background:var(--c);}
@@ -170,6 +175,18 @@
   #banner.commute.soon{border-color:rgba(242,185,138,.6);background:rgba(242,185,138,.10);}
   #banner.commute.now{border-color:var(--peach);background:rgba(242,185,138,.2);}
 
+  /* night mode (21:30-06:00): a dim, nearly black page — clock, tomorrow's first events, weather alerts */
+  #night{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#3E5260;}
+  #stage.night{background:#05090C;}
+  body:has(#stage.night){background:#05090C;}
+  #stage.night > :not(#night){display:none !important;}
+  #stage.night #night{display:flex;}
+  #ntime{font-size:220px;font-weight:100;line-height:1;letter-spacing:-.02em;color:#4A606F;}
+  #ndate{font-size:26px;letter-spacing:.18em;text-transform:uppercase;color:#34474F;}
+  #ntom{margin-top:44px;text-align:center;font-size:28px;line-height:1.5;color:#3E5260;}
+  #ntom .h{font-size:16px;letter-spacing:.2em;text-transform:uppercase;color:#2E3F48;margin-bottom:6px;}
+  #ntom .tm{color:#4F6878;}
+  #nalert{margin-top:24px;font-size:26px;color:#9E5A55;letter-spacing:.06em;text-transform:uppercase;}
   #status{position:absolute;right:52px;bottom:8px;font-size:13px;color:var(--dim);opacity:.7;}
 </style>
 </head>
@@ -177,7 +194,7 @@
 <div id="stage">
   <div class="block" id="clock"><div id="time"></div><div id="date"></div></div>
   <div class="block" id="banner"></div>
-  <div class="block" id="weather"><div id="wnow"><div id="wmain"></div><div id="air"></div></div><div id="wdays"></div></div>
+  <div class="block" id="weather"><div id="wtop"><div id="wnow"><div id="wmain"></div></div><div id="wdays"></div></div><div id="air"></div></div>
   <div class="block panel" id="cal"></div>
   <div class="block panel" id="todo"><div class="label" id="todoTitle">Family list</div><div id="tasks"></div></div>
   <div class="block panel" id="photo">
@@ -187,6 +204,7 @@
   </div>
   <div class="block panel" id="word"><iframe src="../card.html"></iframe></div>
   <div id="status"></div>
+  <div id="night"><div id="ntime"></div><div id="ndate"></div><div id="ntom"></div><div id="nalert"></div></div>
 </div>
 
 <script>
@@ -199,8 +217,10 @@ const DATA = "/data/";                       // written by server.py on the Pi
 // Test hook: dashboard.html?date=2026-10-08
 const params = new URLSearchParams(location.search);
 const now = () => {
-  if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); const t = new Date(); return new Date(y, m-1, d, t.getHours(), t.getMinutes()); }
-  return new Date();
+  const t = new Date();
+  if (params.get("time")) { const [h, mi] = params.get("time").split(":").map(Number); t.setHours(h, mi); }
+  if (params.get("date")) { const [y,m,d] = params.get("date").split("-").map(Number); return new Date(y, m-1, d, t.getHours(), t.getMinutes()); }
+  return t;
 };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
@@ -215,8 +235,35 @@ function fitStage() {
 addEventListener("resize", fitStage); fitStage();
 
 // ── clock ──
+// Night: 21:30-06:00 the screen goes dim and quiet. "?night=0" turns it off for testing.
+const NIGHT = ["21:30", "06:00"];
+function isNight(d) {
+  if (params.get("night") === "0") return false;
+  const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  return hm >= NIGHT[0] || hm < NIGHT[1];
+}
+function renderNight(d) {
+  document.getElementById("ntime").textContent = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
+  document.getElementById("ndate").textContent = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  // "Tomorrow" after midnight's evening, "Today" in the small hours
+  const day = new Date(d); if (d.getHours() >= 12) day.setDate(day.getDate() + 1);
+  const key = ymd(day);
+  const list = events.filter(ev => !ev.hidden && !(ev.allDay && NOTE_TITLE.test(ev.title)) && !(!ev.allDay && ev.free && !ev.location))
+    .filter(ev => ev.allDay ? ev.start <= key && key < (ev.end || ev.start) || ev.start === key : ymd(new Date(ev.start)) === key)
+    .sort((a, b) => (a.allDay ? 0 : new Date(a.start)) - (b.allDay ? 0 : new Date(b.start))).slice(0, 3);
+  const w = wx && wx.daily ? wx.daily.time.indexOf(key) : -1;
+  const temps = w >= 0 ? ` · ${Math.round(wx.daily.temperature_2m_max[w])}° / ${Math.round(wx.daily.temperature_2m_min[w])}°` : "";
+  const label = (d.getHours() >= 12 ? "Tomorrow" : "Today") + temps;
+  document.getElementById("ntom").innerHTML = `<div class="h">${label}</div>` + (list.length
+    ? list.map(ev => `<div>${ev.allDay ? "" : `<span class="tm">${fmtTime(new Date(ev.start))}</span> `}${esc(shortTitle(ev.title))}</div>`).join("")
+    : `<div>Nothing on the calendar</div>`);
+  document.getElementById("nalert").textContent = alerts[0] ? alerts[0].event : "";
+}
 function renderClock() {
   const d = now();
+  const night = isNight(d);
+  document.getElementById("stage").classList.toggle("night", night);
+  if (night) renderNight(d);
   document.getElementById("time").textContent = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
   document.getElementById("date").textContent = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
@@ -247,19 +294,27 @@ const iconFor = c => c <= 1 ? "sun" : c <= 2 ? "part" : c === 3 ? "cloud" : c <=
 const svg = k => `<svg viewBox="0 0 24 24">${ICON[k]}</svg>`;
 
 // Air quality + pollen chips. Hidden when there's no data (the temperature goes back to full size).
+let airData = {}, rainNext = null, wx = null;
 async function loadAir() {
-  try {
-    const a = await getJSON(DATA + "air.json");
-    const chip = (k, x) => x ? `<div class="aq l${x.lvl}"><i></i><span class="k">${k}</span><b>${esc(x.level)}</b></div>` : "";
-    const html = chip("Pollen", a.pollen) + chip("Air", a.aqi);
-    document.getElementById("air").innerHTML = html;
-    document.getElementById("wnow").classList.toggle("air", !!html);
-    setStatus("air", a.error);
-  } catch (e) { /* not fetched yet */ }
+  try { airData = await getJSON(DATA + "air.json"); setStatus("air", airData.error); } catch (e) { /* not fetched yet */ }
+  renderChips();
 }
+// Pollen, air quality and rain timing as small chips under the forecast. On Med-High/High
+// pollen days the main culprits ride along ("Ragweed, Elm"); rain only shows when it's coming.
+function renderChips() {
+  const chip = (k, x, why) => x ? `<div class="aq l${x.lvl}"><i></i><span class="k">${k}</span><b>${esc(x.level)}</b>${why ? `<span class="why">${esc(why)}</span>` : ""}</div>` : "";
+  const po = airData.pollen;
+  const why = po && po.lvl >= 2 && (po.triggers || []).length ? po.triggers.slice(0, 2).join(", ") : "";
+  const rain = rainNext ? `<div class="aq rain">${UMBRELLA}<span class="k">Rain</span><b>${esc(rainNext.label)}</b>${rainNext.max ? `<span class="why">${rainNext.max}%</span>` : ""}</div>` : "";
+  const html = chip("Pollen", po, why) + chip("Air", airData.aqi) + rain;
+  document.getElementById("air").innerHTML = html;
+  document.getElementById("weather").classList.toggle("air", !!html);
+}
+const UMBRELLA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v6.5a2 2 0 0 1-4 0"/></svg>';
 async function loadWeather() {
   try {
     const w = await getJSON(DATA + "weather.json");   // fetched by server.py
+    wx = w; rainNext = w.rain || null; renderChips(); renderClock();
     document.getElementById("wmain").innerHTML = `<div id="wtemp">${Math.round(w.current.temperature_2m)}°</div>${svg(iconFor(w.current.weather_code))}`;
     document.getElementById("wdays").innerHTML = w.daily.time.map((t, i) => {
       const [y, m, d] = t.split("-").map(Number);
@@ -379,6 +434,7 @@ async function loadCalendar() {
     lastEvents = next; events = c.events || [];
   } catch (e) { setStatus("cal", "no calendar data"); }
   renderCalendar();
+  renderClock();                                   // night page lists tomorrow's events
 }
 
 // ── family list (Google Tasks) ──
