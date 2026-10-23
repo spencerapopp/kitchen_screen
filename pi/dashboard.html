@@ -264,6 +264,7 @@ function renderClock() {
   const night = isNight(d);
   document.getElementById("stage").classList.toggle("night", night);
   if (night) renderNight(d);
+  else if (needFit) fitCalendar();                 // calendar changed while it was hidden for the night
   document.getElementById("time").textContent = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/, "");
   document.getElementById("date").textContent = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
@@ -409,8 +410,17 @@ function renderCalendar() {
     `${esc(shortTitle(g.ev.title))}</div>`).join("");
   const cal = document.getElementById("cal");
   cal.innerHTML = html;
-  // Fit every event in its day with its whole title: shrink the text from 19px down to 11px.
-  // Only if that still doesn't fit, cut titles to 2 lines, then 1 line (the only time "…" appears).
+  fitCalendar();
+}
+// Fit every event in its day with its whole title: shrink the text from 19px down to 11px.
+// Only if that still doesn't fit, cut titles to 2 lines, then 1 line (the only time "…" appears).
+// Measuring only works while the calendar is on screen: at night it is display:none and every cell
+// measures 0px, so the fit waits (needFit) and runs when the day page comes back.
+let needFit = false;
+function fitCalendar() {
+  const cal = document.getElementById("cal");
+  if (!cal.offsetParent || cal.clientHeight === 0) { needFit = true; return; }
+  needFit = false;
   const STEPS = [];
   for (let fs = 19; fs >= 11; fs--) STEPS.push(["none", fs]);
   STEPS.push([2, 11], [1, 11], [1, 10]);
@@ -620,6 +630,7 @@ async function loadBanner() {
 
 // ── schedule ──
 renderClock(); setInterval(renderClock, 5000);
+if (document.fonts) document.fonts.ready.then(fitCalendar);   // web fonts can land after the first fit
 loadBanner(); setInterval(loadBanner, 20 * 1000); setInterval(renderBanner, 15 * 1000);
 loadWeather(); setInterval(loadWeather, 60 * 1000);
 loadAir(); setInterval(loadAir, 5 * 60 * 1000);
