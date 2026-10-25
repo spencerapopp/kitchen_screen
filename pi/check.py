@@ -70,8 +70,11 @@ def main():
     if a is not None:
         po, aq = (a or {}).get("pollen"), (a or {}).get("aqi")
         add(OK if po and aq else BAD, "pollen + air",
-            f"pollen {po['level'] + ' (' + ', '.join(po.get('triggers') or []) + ')' if po else 'MISSING'} | "
-            f"air {str(aq['value']) + ' ' + aq['level'] if aq else 'MISSING'}" + (f" | {a['error']}" if a.get("error") else ""))
+            f"pollen {po['level'] + ' (' + ', '.join(po.get('triggers') or []) + ') via ' + po.get('source', 'pollen.com') if po else 'MISSING'} | "
+            f"air {aq.get('advice', aq['level']) + ' (AQI ' + str(aq['value']) + ' now, ' + str(aq.get('peak', aq['value'])) + ' peak)' if aq else 'MISSING'}"
+            + (f" | {a['error']}" if a.get("error") else ""))
+    add(OK if cfg.get("google_pollen_key") else MEH, "pollen source",
+        "Google Pollen API" if cfg.get("google_pollen_key") else "pollen.com only (add \"google_pollen_key\" for a steadier feed)")
     cd, _ = data("countdown.json")
     if cd is not None:
         add(MEH, "countdown", f"{cd.get('label')}: {cd.get('days')} days" if cd.get("show") else "nothing coming up"

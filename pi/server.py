@@ -444,12 +444,13 @@ def home_zip(cfg):
 
 
 def pollen_today(z):
-    r = json.loads(http(f"https://www.pollen.com/api/forecast/current/pollen/{z}",
+    r = json.loads(http(f"https://www.pollen.com/api/forecast/current/pollen/{z}", timeout=12,
                         headers={"Referer": f"https://www.pollen.com/forecast/current/pollen/{z}",
                                  "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36",
                                  "Accept": "application/json"}))
     periods = (r.get("Location") or {}).get("periods") or []
     today = next((x for x in periods if x.get("Type") == "Today"), periods[1] if len(periods) > 1 else None)
+    tmrw = next((x for x in periods if x.get("Type") == "Tomorrow"), None)
     if not today or today.get("Index") is None:
         raise ValueError("no pollen forecast for today")
     idx = float(today["Index"])
@@ -457,7 +458,110 @@ def pollen_today(z):
     trig = today.get("Triggers") or []
     trig = trig.values() if isinstance(trig, dict) else trig
     names = [t.get("Name") for t in trig if isinstance(t, dict) and t.get("Name")]
-    return {"index": round(idx, 1), "level": word, "lvl": lvl, "triggers": names[:3]}
+    trend = None
+    if tmrw and tmrw.get("Index") is not None:
+        t = float(tmrw["Index"])
+        trend = "up" if t - idx >= 1.5 else "down" if idx - t >= 1.5 else None
+    return {"index": round(idx, 1), "level": word, "lvl": lvl, "triggers": names[:3], "trend": trend,
+            "source": "pollen.com"}
+
+
+# Google Pollen API: needs "google_pollen_key" in config.json (free for up to 5,000 calls a month;
+# the screen uses about 250). Universal Pollen Index 0-5 for grass, tree and weed, plus plants.
+UPI = {0: ("None", 0), 1: ("Very low", 0), 2: ("Low", 0), 3: ("Moderate", 1), 4: ("High", 2), 5: ("Very high", 3)}
+
+
+def pollen_google(cfg, lat, lng):
+    r = json.loads(http("https://pollen.googleapis.com/v1/forecast:lookup?" + urllib.parse.urlencode({
+        "key": cfg["google_pollen_key"], "location.latitude": lat, "location.longitude": lng,
+        "days": 2, "languageCode": "en", "plantsDescription": "false"}), timeout=15))
+    days = r.get("dailyInfo") or []
+    if not days:
+        raise ValueError("no pollen forecast for today")
+
+    def peak(d):
+        return max([(t.get("indexInfo") or {}).get("value", 0) for t in d.get("pollenTypeInfo") or []] or [0])
+
+    v = peak(days[0])
+    word, lvl = UPI.get(v, UPI[5])
+    plants = sorted(((p.get("indexInfo") or {}).get("value", 0), p.get("displayName"))
+                    for p in days[0].get("plantInfo") or [] if p.get("inSeason") and (p.get("indexInfo") or {}).get("value", 0) >= 2)
+    if not plants:                                  # no plant detail: name the pollen type instead
+        plants = sorted(((t.get("indexInfo") or {}).get("value", 0), t.get("displayName"))
+                        for t in days[0].get("pollenTypeInfo") or [] if (t.get("indexInfo") or {}).get("value", 0) >= 2)
+    trend = None
+    if len(days) > 1:
+        t = peak(days[1])
+        trend = "up" if t > v else "down" if t < v else None
+    return {"index": v, "level": word, "lvl": lvl, "triggers": [n for _, n in reversed(plants) if n][:3],
+            "trend": trend, "source": "google"}
+
+
+def pollen_now(cfg, lat, lng):
+    """Google first when a key is set, pollen.com otherwise or as the fallback."""
+    errs = []
+    if cfg.get("google_pollen_key"):
+        try:
+            return pollen_google(cfg, lat, lng)
+        except Exception as e:
+            errs.append(f"google {type(e).__name__} {str(e)[:60]}")
+    z = home_zip(cfg)
+    if z:
+        try:
+            return pollen_today(z)
+        except Exception as e:
+            errs.append(f"pollen.com {type(e).__name__} {str(e)[:60]}")
+    raise RuntimeError("; ".join(errs) or "no ZIP code for pollen")
+
+
+# What the air means for the day, from the hourly forecast of the hours still ahead (7 AM-8 PM;
+# after 8 PM it looks at tomorrow). EPA counts kids as a sensitive group, so the advice is
+# written for a family with a little one: "Good", "Fine", "Easy outside 2–6 PM", ...
+AIR_ADVICE = [(50, "Good", 0), (100, "Fine", 1), (150, "Easy outside", 2), (200, "Limit outside", 3),
+              (10_000, "Stay inside", 4)]
+
+
+def _hours_label(a, b):
+    h = lambda t: f"{t.hour % 12 or 12}"
+    ap = lambda t: "AM" if t.hour < 12 else "PM"
+    return f"{h(a)}–{h(b)} {ap(b)}" if ap(a) == ap(b) else f"{h(a)} {ap(a)}–{h(b)} {ap(b)}"
+
+
+def air_outlook(r, now=None):
+    now = now or datetime.now(TZ).replace(tzinfo=None)
+    hr = r.get("hourly") or {}
+    rows = []
+    for i, t in enumerate(hr.get("time") or []):
+        v = (hr.get("us_aqi") or [None])[i] if i < len(hr.get("us_aqi") or []) else None
+        if v is None:
+            continue
+        rows.append((datetime.fromisoformat(t), round(v), (hr.get("us_aqi_ozone") or [0])[i] or 0,
+                     (hr.get("us_aqi_pm2_5") or [0])[i] or 0))
+    day = now.date() if now.hour < 20 else now.date() + timedelta(days=1)
+    start = now.replace(minute=0, second=0, microsecond=0) if day == now.date() else datetime.combine(day, datetime.min.time())
+    span = [x for x in rows if x[0].date() == day and x[0] >= start and 7 <= x[0].hour < 20]
+    cur = (r.get("current") or {}).get("us_aqi")
+    hourly = bool(span)
+    if not span:
+        if cur is None:
+            return None
+        span = [(now, round(cur), 0, 0)]
+    worst = max(span, key=lambda x: x[1])
+    advice, lvl = next((w, l) for top, w, l in AIR_ADVICE if worst[1] <= top)
+    level = next(w for top, w, _ in AQI_LEVELS if worst[1] <= top)
+    out = {"value": round(cur) if cur is not None else worst[1], "peak": worst[1], "level": level,
+           "advice": advice, "lvl": lvl, "day": "today" if day == now.date() else "tomorrow"}
+    if not hourly:                                 # only a current reading: no timing to give
+        return out
+    if worst[1] > 50:
+        out["cause"] = "smoke/dust" if worst[3] > worst[2] else "ozone"
+    if worst[1] > 100:                            # when to keep the kids' outdoor time short
+        bad = [x[0] for x in span if x[1] > 100]
+        out["when"] = _hours_label(bad[0], bad[-1] + timedelta(hours=1))
+    elif worst[1] > 50:
+        out["when"] = "peaks " + _hours_label(worst[0], worst[0] + timedelta(hours=1)).split("–")[0] + \
+                      (" AM" if worst[0].hour < 12 else " PM")
+    return out
 
 
 def update_air(cfg):
@@ -469,22 +573,21 @@ def update_air(cfg):
     err = []
     try:
         r = json.loads(http(f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lng}"
-                            "&current=us_aqi&timezone=America%2FChicago"))
-        v = r["current"]["us_aqi"]
-        if v is not None:
-            v = round(v)
-            word, lvl = next((w, l) for top, w, l in AQI_LEVELS if v <= top)
-            _air.update(aqi={"value": v, "level": word, "lvl": lvl}, aqi_at=now)
+                            "&current=us_aqi&hourly=us_aqi,us_aqi_ozone,us_aqi_pm2_5&forecast_days=2"
+                            "&timezone=America%2FChicago"))
+        a = air_outlook(r)
+        if a:
+            _air.update(aqi=a, aqi_at=now)
     except Exception as e:
         err.append(f"air quality: {type(e).__name__} {str(e)[:80]}")
-    z = home_zip(cfg)
-    if z and cfg.get("pollen", True):
+    # Pollen forecasts change once a day: refresh every 3 hours once we have one.
+    if cfg.get("pollen", True) and (not _air["pollen"] or now - _air["pollen_at"] > 3 * 3600):
         try:
-            _air.update(pollen=pollen_today(z), pollen_at=now)
+            _air.update(pollen=pollen_now(cfg, lat, lng), pollen_at=now)
         except Exception as e:
-            err.append(f"pollen: {type(e).__name__} {str(e)[:80]}")
-    for k in ("aqi", "pollen"):                       # a reading older than 6 hours is dropped
-        if _air[k] and now - _air[k + "_at"] > 6 * 3600:
+            err.append(f"pollen: {str(e)[:140]}")
+    for k in ("aqi", "pollen"):                       # a reading older than 8 hours is dropped
+        if _air[k] and now - _air[k + "_at"] > 8 * 3600:
             _air[k] = None
     if err:
         log("air:", "; ".join(err))

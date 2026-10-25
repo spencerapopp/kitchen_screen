@@ -303,14 +303,23 @@ async function loadAir() {
   try { airData = await getJSON(DATA + "air.json"); setStatus("air", airData.error); } catch (e) { /* not fetched yet */ }
   renderChips();
 }
-// Pollen, air quality and rain timing as small chips under the forecast. On Med-High/High
-// pollen days the main culprits ride along ("Ragweed, Elm"); rain only shows when it's coming.
+// Pollen, air and rain as small chips under the forecast, each saying what it means today:
+//   Pollen  High  Ragweed, Oak ↑        what's in the air, and ↑/↓ when tomorrow is worse/better
+//   Air     Easy outside  2–6 PM · ozone   advice for kids' outdoor time, and when; "Good"/"Fine" otherwise
+//   Rain    3–5 PM  70%                 only when rain is coming
 function renderChips() {
-  const chip = (k, x, why) => x ? `<div class="aq l${x.lvl}"><i></i><span class="k">${k}</span><b>${esc(x.level)}</b>${why ? `<span class="why">${esc(why)}</span>` : ""}</div>` : "";
-  const po = airData.pollen;
-  const why = po && po.lvl >= 2 && (po.triggers || []).length ? po.triggers.slice(0, 2).join(", ") : "";
+  const chip = (k, x, word, why) => x ? `<div class="aq l${x.lvl}"><i></i><span class="k">${k}</span><b>${esc(word)}</b>${why ? `<span class="why">${why}</span>` : ""}</div>` : "";
+  const po = airData.pollen, aq = airData.aqi;
+  const arrow = po && po.trend ? (po.trend === "up" ? " ↑" : " ↓") : "";
+  const poWhy = po ? esc((po.lvl >= 1 ? (po.triggers || []).slice(0, 2).join(", ") : "")) + arrow : "";
+  let aqWord = "", aqWhy = "";
+  if (aq) {
+    aqWord = aq.advice || aq.level;
+    const bits = [aq.lvl >= 2 ? aq.when : "", aq.lvl >= 2 ? aq.cause : "", aq.day === "tomorrow" ? "tomorrow" : ""].filter(Boolean);
+    aqWhy = esc(bits.join(" · "));
+  }
   const rain = rainNext ? `<div class="aq rain">${UMBRELLA}<span class="k">Rain</span><b>${esc(rainNext.label)}</b>${rainNext.max ? `<span class="why">${rainNext.max}%</span>` : ""}</div>` : "";
-  const html = chip("Pollen", po, why) + chip("Air", airData.aqi) + rain;
+  const html = chip("Pollen", po, po && po.level, poWhy) + chip("Air", aq, aqWord, aqWhy) + rain;
   document.getElementById("air").innerHTML = html;
   document.getElementById("weather").classList.toggle("air", !!html);
 }
