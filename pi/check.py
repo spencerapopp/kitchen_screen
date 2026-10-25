@@ -59,7 +59,8 @@ def main():
     im = cfg.get("immich") or {}
     ph, _ = data("photos.json")
     add(OK if im.get("keys") else MEH, "photo source",
-        f"Immich ({', '.join(im['keys'])}) | {len((ph or {}).get('photos') or [])} photos on the Pi" if im.get("keys")
+        f"Immich ({', '.join(im['keys'])}) | {len((ph or {}).get('photos') or [])} photos on the Pi"
+        + (f" | {ph['detail']}" if (ph or {}).get("detail") else "") if im.get("keys")
         else "Google Drive folder (pi/immich_setup.py switches to Immich)")
     tl, _ = data("tasks.json")
     add(MEH, "family list source", "Google Keep" if (tl or {}).get("source") == "keep" else "Google Tasks")
@@ -72,7 +73,7 @@ def main():
         add(OK if po and aq else BAD, "pollen + air",
             f"pollen {po['level'] + ' (' + ', '.join(po.get('triggers') or []) + ') via ' + po.get('source', 'pollen.com') if po else 'MISSING'} | "
             f"air {aq.get('advice', aq['level']) + ' (AQI ' + str(aq['value']) + ' now, ' + str(aq.get('peak', aq['value'])) + ' peak)' if aq else 'MISSING'}"
-            + (f" | {a['error']}" if a.get("error") else ""))
+            + (f" | {a['error']}" if a.get("error") else "") + (f" | {a['pollen_error']}" if a.get("pollen_error") else ""))
     add(OK if cfg.get("google_pollen_key") else MEH, "pollen source",
         "Google Pollen API" if cfg.get("google_pollen_key") else "pollen.com only (add \"google_pollen_key\" for a steadier feed)")
     cd, _ = data("countdown.json")

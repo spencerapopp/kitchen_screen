@@ -41,6 +41,7 @@ SKIP_NAME = re.compile(r"screen.?shot|screen.?record|screencap|scan[_ -]|receipt
 BASE = {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}}
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 _retry = {"at": 0, "error": None}
+_not_ready = set()                                # asset ids with no Immich preview yet (cleared each new pick)
 
 
 class Immich:
@@ -83,6 +84,8 @@ def usable(a, pinned=False):
     if a.get("type") not in (None, "IMAGE") or a.get("isTrashed") or a.get("isArchived"):
         return False
     if a.get("visibility") not in (None, "timeline"):
+        return False
+    if a.get("resized") is False:                 # Immich hasn't made its screen-size copy yet
         return False
     if pinned:                                    # you put it in the album on purpose: show it
         return True
@@ -216,6 +219,7 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
             except Exception as e:
                 failed.append(f"{who} (can't reach mrpopp: {type(e).__name__})")
         if pools:
+            _not_ready.clear()
             items = choose(pools, int(im.get("count", 500)), today)
             pick = {"date": today.isoformat(), "sig": sig, "items": items}
             with open(pick_file + ".tmp", "w") as f:
@@ -231,13 +235,13 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
             log("immich:", error)
 
     os.makedirs(photos_dir, exist_ok=True)
-    keep, captions, added, broken = [], [], 0, 0
+    keep, captions, added, broken, not_ready = [], [], 0, 0, 0
     for x in pick.get("items") or []:
         name = f"im_{x['id']}.jpg"
         path = os.path.join(photos_dir, name)
         if not os.path.exists(path):
             api = apis.get(x["who"])
-            if not api or added >= 200:               # spread big first downloads over a few runs
+            if not api or added >= 200 or x["id"] in _not_ready:   # spread big first downloads over a few runs
                 continue
             try:
                 jpg = to_jpeg(api.thumbnail(x["id"]))
@@ -245,6 +249,15 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
                     f.write(jpg)
                 os.replace(path + ".tmp", path)
                 added += 1
+            except urllib.error.HTTPError as e:
+                if e.code == 404:                     # no preview in Immich yet: skip it today, quietly
+                    _not_ready.add(x["id"])
+                    not_ready += 1
+                else:
+                    broken += 1
+                    if broken <= 3:
+                        log("immich photo failed:", x["id"], e)
+                continue
             except Exception as e:
                 broken += 1
                 if broken <= 3:
@@ -257,11 +270,16 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
         for f in os.listdir(photos_dir):
             if f.endswith(".jpg") and f not in wanted and (f.startswith("im_") or keep):
                 os.remove(os.path.join(photos_dir, f))
-    if not error and broken:
-        error = f"{broken} photos could not be loaded from Immich"
+    if not_ready:
+        log(f"immich: {not_ready} photos skipped today (Immich has no preview for them yet)")
+    # The screen only shows a problem the family would notice: no photos, or a set that's
+    # gone stale because mrpopp has been unreachable since before today. Details: check.py / logs.
+    detail = error or (f"{broken} photos failed to download" if broken else None)
+    if keep and pick.get("date") == today.isoformat():
+        error = None
     if not keep and not error:
-        error = "Immich: no photos matched yet"
+        error = "Immich: no photos available yet"
     write_json("photos.json", {"photos": keep, "captions": captions, "seconds": seconds,
-                                "source": "immich", "error": error})
+                                "source": "immich", "error": error, "detail": detail})
     if added:
         log(f"photos: {len(keep)} from Immich ({added} new)")

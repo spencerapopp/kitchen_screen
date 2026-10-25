@@ -591,9 +591,13 @@ def update_air(cfg):
             _air[k] = None
     if err:
         log("air:", "; ".join(err))
-        _air["at"] = now - 25 * 60                    # a failure is retried in 5 minutes, not 30
+        if any(e.startswith("air") for e in err):
+            _air["at"] = now - 25 * 60                # an air-quality failure is retried in 5 minutes, not 30
+    # Only a missing air reading is shown on screen; pollen trouble is for check.py (the chip just hides).
+    pollen_err = next((e for e in err if e.startswith("pollen")), None)
     write_json("air.json", {"aqi": _air["aqi"], "pollen": _air["pollen"],
-                            "error": ("no " + " / ".join(e.split(":")[0] for e in err) + " data") if err and not (_air["aqi"] and _air["pollen"]) else None})
+                            "pollen_error": pollen_err if not _air["pollen"] else None,
+                            "error": "no air quality data" if not _air["aqi"] and any(e.startswith("air") for e in err) else None})
 
 
 # ── countdown: one at a time, shown in the banner spot when nothing else is there ──
