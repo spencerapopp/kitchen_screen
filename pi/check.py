@@ -56,6 +56,11 @@ def main():
         d, m = data(f)
         err = (d or {}).get("error") or (d or {}).get("warning")
         add(BAD if d is None or err else OK, label, f"updated {age(m)}" + (f" | {err}" if err else ""))
+    im = cfg.get("immich") or {}
+    ph, _ = data("photos.json")
+    add(OK if im.get("keys") else MEH, "photo source",
+        f"Immich ({', '.join(im['keys'])}) | {len((ph or {}).get('photos') or [])} photos on the Pi" if im.get("keys")
+        else "Google Drive folder (pi/immich_setup.py switches to Immich)")
     tl, _ = data("tasks.json")
     add(MEH, "family list source", "Google Keep" if (tl or {}).get("source") == "keep" else "Google Tasks")
     k = cfg.get("keep") or {}

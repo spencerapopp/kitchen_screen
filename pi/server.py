@@ -6,8 +6,9 @@ small data files fresh in ~/kitchen-data (served at /data/):
 
   calendar.json  events from Google Calendar                    (every 30 seconds)
   tasks.json     open items on your Google Tasks family list   (every 15 seconds)
-  photos.json    photos from the Google Drive "Kitchen Photos" folder, converted
-                 to JPEG and resized, cached in ~/kitchen-data/photos/  (every 5 minutes)
+  photos.json    a daily pick from Immich on mrpopp (pi/immich_source.py), or else the
+                 Google Drive "Kitchen Photos" folder; converted to JPEG, resized, and
+                 cached in ~/kitchen-data/photos/  (checked every 5 minutes)
   alerts.json    National Weather Service warnings/watches for home (every minute)
   leave.json     "leave by" times for events with an address in the next 3 hours
   commute.json   weekday-morning drive times to the places in config "commute"
@@ -342,6 +343,11 @@ def to_jpeg(raw):
 
 
 def update_photos(cfg):
+    if (cfg.get("immich") or {}).get("keys"):         # family photo server on mrpopp (pi/immich_source.py)
+        import immich_source
+        immich_source.update(cfg, data_dir=DATA, photos_dir=PHOTOS, write_json=write_json,
+                             to_jpeg=to_jpeg, log=log)
+        return
     if not google_token(cfg):
         write_json("photos.json", {"photos": [], "error": "Google not connected yet"})
         return

@@ -34,7 +34,9 @@ This repo is public, so the only thing published is keywords for today's activit
 ## Raspberry Pi version (no DAKboard)
 
 `pi/` runs the whole screen on the Pi: `pi/dashboard.html` (layout), `pi/server.py` (calendar,
-Google Tasks, Drive photos → `~/kitchen-data`), `pi/setup.sh` (one-command install),
+Google Tasks, photos → `~/kitchen-data`), `pi/setup.sh` (one-command install),
+`pi/immich_source.py` + `pi/immich_setup.py` (daily photo pick from Immich on mrpopp; without
+it the photos come from the Drive "Kitchen Photos" folder),
 `pi/google_auth.py` (one-time Google sign-in). Private settings stay on the Pi in
 `~/.config/kitchen/config.json`. The Pi pulls this repo nightly at 3:30 AM.
 

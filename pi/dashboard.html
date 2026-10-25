@@ -102,6 +102,9 @@
   .ph.on{opacity:1;}
   .ph .bg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(24px) brightness(.55);}
   .ph .fg{position:absolute;inset:0;background-size:contain;background-position:center;background-repeat:no-repeat;}
+  .ph .cap{position:absolute;right:12px;top:10px;padding:3px 10px;border-radius:12px;font-size:14px;color:#fff;
+           background:rgba(0,0,0,.38);opacity:.92;}   /* top corner: the quote covers the bottom of the panel */
+  .ph .cap:empty{display:none;}
   #quote{position:absolute;left:0;bottom:0;width:100%;height:162px;border:0;background:transparent;}
 
   /* word of the day */
@@ -198,8 +201,8 @@
   <div class="block panel" id="cal"></div>
   <div class="block panel" id="todo"><div class="label" id="todoTitle">Family list</div><div id="tasks"></div></div>
   <div class="block panel" id="photo">
-    <div class="ph" id="phA"><div class="bg"></div><div class="fg"></div></div>
-    <div class="ph" id="phB"><div class="bg"></div><div class="fg"></div></div>
+    <div class="ph" id="phA"><div class="bg"></div><div class="fg"></div><div class="cap"></div></div>
+    <div class="ph" id="phB"><div class="bg"></div><div class="fg"></div><div class="cap"></div></div>
     <iframe id="quote" src="../quote.html" allowtransparency="true"></iframe>
   </div>
   <div class="block panel" id="word"><iframe src="../card.html"></iframe></div>
@@ -463,12 +466,12 @@ async function loadTasks() {
   } catch (e) { setStatus("tasks", "no list data"); }
 }
 
-// ── photos (Google Drive "Kitchen Photos" folder, cached on the Pi) ──
-let photos = [], photoIdx = -1, front = "phA";
+// ── photos (daily pick from Immich on mrpopp, or the Drive "Kitchen Photos" folder; cached on the Pi) ──
+let photos = [], captions = [], photoIdx = -1, front = "phA";
 async function loadPhotos() {
   try { const p = await getJSON(DATA + "photos.json");
         if (JSON.stringify(p.photos || []) !== JSON.stringify(photos)) deck = [];
-        photos = p.photos || []; photoSeconds = Math.max(5, Number(p.seconds) || 20); setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
+        photos = p.photos || []; captions = p.captions || []; photoSeconds = Math.max(5, Number(p.seconds) || 20); setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
   if (photoIdx < 0) nextPhoto();
 }
 let deck = [];                                  // shuffled order: every photo once before any repeats
@@ -480,12 +483,13 @@ function nextPhoto() {
     if (deck.length > 1 && deck[deck.length - 1] === photoIdx) deck.unshift(deck.pop());   // no back-to-back repeat
   }
   photoIdx = deck.pop();
-  const url = DATA + photos[photoIdx];
+  const url = DATA + photos[photoIdx], cap = captions[photoIdx] || "";
   const img = new Image();
   img.onload = () => {
     const back = front === "phA" ? "phB" : "phA";
     const el = document.getElementById(back);
     el.querySelector(".bg").style.backgroundImage = el.querySelector(".fg").style.backgroundImage = `url("${url}")`;
+    el.querySelector(".cap").textContent = cap;
     el.classList.add("on"); document.getElementById(front).classList.remove("on"); front = back;
   };
   img.src = url;
