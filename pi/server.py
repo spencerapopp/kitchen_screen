@@ -517,7 +517,7 @@ def pollen_now(cfg, lat, lng):
 # What the air means for the day, from the hourly forecast of the hours still ahead (7 AM-8 PM;
 # after 8 PM it looks at tomorrow). EPA counts kids as a sensitive group, so the advice is
 # written for a family with a little one: "Good", "Fine", "Easy outside 2–6 PM", ...
-AIR_ADVICE = [(50, "Good", 0), (100, "Fine", 1), (150, "Easy outside", 2), (200, "Limit outside", 3),
+AIR_ADVICE = [(50, "Good", 0), (100, "Fine", 0), (150, "Easy outside", 2), (200, "Limit outside", 3),
               (10_000, "Stay inside", 4)]
 
 

@@ -305,7 +305,7 @@ async function loadAir() {
 }
 // Pollen, air and rain as small chips under the forecast, each saying what it means today:
 //   Pollen  High  Ragweed, Oak ↑        what's in the air, and ↑/↓ when tomorrow is worse/better
-//   Air     Easy outside  2–6 PM · ozone   advice for kids' outdoor time, and when; "Good"/"Fine" otherwise
+//   Air     Fine  AQI 64 · peaks 3 PM    green when no action is needed; Easy outside 2–6 PM · ozone when it is
 //   Rain    3–5 PM  70%                 only when rain is coming
 function renderChips() {
   const chip = (k, x, word, why) => x ? `<div class="aq l${x.lvl}"><i></i><span class="k">${k}</span><b>${esc(word)}</b>${why ? `<span class="why">${why}</span>` : ""}</div>` : "";
@@ -315,7 +315,9 @@ function renderChips() {
   let aqWord = "", aqWhy = "";
   if (aq) {
     aqWord = aq.advice || aq.level;
-    const bits = [aq.lvl >= 2 ? aq.when : "", aq.lvl >= 2 ? aq.cause : "", aq.day === "tomorrow" ? "tomorrow" : ""].filter(Boolean);
+    // Always the number; then when it peaks (or the hours to keep outdoor play short) and why.
+    const big = (aq.peak || aq.value) > 100;
+    const bits = [`AQI ${aq.value}`, aq.when || "", big ? aq.cause : "", aq.day === "tomorrow" ? "tomorrow" : ""].filter(Boolean);
     aqWhy = esc(bits.join(" · "));
   }
   const rain = rainNext ? `<div class="aq rain">${UMBRELLA}<span class="k">Rain</span><b>${esc(rainNext.label)}</b>${rainNext.max ? `<span class="why">${rainNext.max}%</span>` : ""}</div>` : "";
