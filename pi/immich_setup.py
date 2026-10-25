@@ -4,7 +4,7 @@
 Before running this, in Immich (http://192.168.4.54:2283), signed in as each person whose
 photos should show:
   Account Settings > API Keys > New API Key
-  Name: Kitchen screen.  Permissions: asset.read, asset.view, album.read, person.read
+  Name: Kitchen screen.  Permissions: asset.read, asset.view, album.read, person.read, face.read
 Then on the Pi:   python3 ~/kitchen_screen/pi/immich_setup.py
 Keys are typed in hidden and saved only in ~/.config/kitchen/config.json on the Pi.
 """

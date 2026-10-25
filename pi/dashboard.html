@@ -101,7 +101,7 @@
   .ph{position:absolute;inset:0;opacity:0;transition:opacity 1.6s ease;}
   .ph.on{opacity:1;}
   .ph .bg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(24px) brightness(.55);}
-  .ph .fg{position:absolute;inset:0;background-size:contain;background-position:center;background-repeat:no-repeat;}
+  .ph .fg{position:absolute;inset:0;background-size:cover;background-position:center 35%;background-repeat:no-repeat;}
   .ph .cap{position:absolute;right:12px;top:10px;padding:3px 10px;border-radius:12px;font-size:14px;color:#fff;
            background:rgba(0,0,0,.38);opacity:.92;}   /* top corner: the quote covers the bottom of the panel */
   .ph .cap:empty{display:none;}
@@ -476,12 +476,23 @@ async function loadTasks() {
 }
 
 // ── photos (daily pick from Immich on mrpopp, or the Drive "Kitchen Photos" folder; cached on the Pi) ──
-let photos = [], captions = [], photoIdx = -1, front = "phA";
+let photos = [], captions = [], focus = [], photoIdx = -1, front = "phA";
 async function loadPhotos() {
   try { const p = await getJSON(DATA + "photos.json");
         if (JSON.stringify(p.photos || []) !== JSON.stringify(photos)) deck = [];
-        photos = p.photos || []; captions = p.captions || []; photoSeconds = Math.max(5, Number(p.seconds) || 20); setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
+        photos = p.photos || []; captions = p.captions || []; focus = p.focus || []; photoSeconds = Math.max(5, Number(p.seconds) || 20); setStatus("photos", p.error); } catch (e) { setStatus("photos", "no photo data"); }
   if (photoIdx < 0) nextPhoto();
+}
+// Fill the whole panel (crop, don't letterbox). The crop keeps the focal point, faces when Immich
+// knows them, in view and lands it around 30% down so Olivia's quote at the bottom doesn't cover it.
+function fillFrame(fg, img, fp) {
+  const cw = fg.clientWidth, ch = fg.clientHeight, iw = img.naturalWidth, ih = img.naturalHeight;
+  if (!cw || !ch || !iw || !ih) return;
+  const [fx, fy] = Array.isArray(fp) ? fp : [0.5, ih > iw ? 0.35 : 0.45];
+  const s = Math.max(cw / iw, ch / ih), w = iw * s, h = ih * s;
+  const clamp = (v, lo) => Math.min(0, Math.max(lo, v));
+  fg.style.backgroundSize = `${w}px ${h}px`;
+  fg.style.backgroundPosition = `${clamp(cw * 0.5 - fx * w, cw - w)}px ${clamp(ch * 0.3 - fy * h, ch - h)}px`;
 }
 let deck = [];                                  // shuffled order: every photo once before any repeats
 function nextPhoto() {
@@ -492,12 +503,13 @@ function nextPhoto() {
     if (deck.length > 1 && deck[deck.length - 1] === photoIdx) deck.unshift(deck.pop());   // no back-to-back repeat
   }
   photoIdx = deck.pop();
-  const url = DATA + photos[photoIdx], cap = captions[photoIdx] || "";
+  const url = DATA + photos[photoIdx], cap = captions[photoIdx] || "", fp = focus[photoIdx];
   const img = new Image();
   img.onload = () => {
     const back = front === "phA" ? "phB" : "phA";
     const el = document.getElementById(back);
     el.querySelector(".bg").style.backgroundImage = el.querySelector(".fg").style.backgroundImage = `url("${url}")`;
+    fillFrame(el.querySelector(".fg"), img, fp);
     el.querySelector(".cap").textContent = cap;
     el.classList.add("on"); document.getElementById(front).classList.remove("on"); front = back;
   };

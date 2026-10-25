@@ -23,7 +23,8 @@ config.json:
     "recent_days": 60,                  optional
     "captions": true                    optional; "On this day · 2019", "Oct 2021 · Dallas"
   }
-API keys need these permissions: asset.read, asset.view, album.read, person.read.
+API keys need these permissions: asset.read, asset.view, album.read, person.read
+(plus face.read so photos crop around faces; without it the crop uses a rule of thumb).
 Set it up with:  python3 ~/kitchen_screen/pi/immich_setup.py
 """
 import json
@@ -42,6 +43,7 @@ BASE = {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}}
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 _retry = {"at": 0, "error": None}
 _not_ready = set()                                # asset ids with no Immich preview yet (cleared each new pick)
+_faces_off = set()                                # accounts whose key lacks face.read
 
 
 class Immich:
@@ -99,6 +101,34 @@ def usable(a, pinned=False):
         if max(w, h) / min(w, h) > 2.05:           # phone-screen shapes: screenshots, receipts, long scans
             return False
     return True
+
+
+def focal_point(api, asset_id, jpg):
+    """Where to keep in frame when the photo is cropped to fill the panel: [x, y] as fractions.
+    Uses Immich's face boxes when the key has face.read; otherwise a phone-photo rule of thumb
+    (people sit in the upper part of portrait shots)."""
+    if api and api.who not in _faces_off:
+        try:
+            faces = api.call("GET", f"/faces?id={asset_id}") or []
+            boxes = [(f["boundingBoxX1"] / f["imageWidth"], f["boundingBoxY1"] / f["imageHeight"],
+                      f["boundingBoxX2"] / f["imageWidth"], f["boundingBoxY2"] / f["imageHeight"])
+                     for f in faces if f.get("imageWidth") and f.get("imageHeight")]
+            if boxes:
+                x1, y1 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+                x2, y2 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+                return [round((x1 + x2) / 2, 3), round((y1 + y2) / 2, 3)]
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                _faces_off.add(api.who)              # this key lacks face.read: stop asking
+        except Exception:
+            pass
+    try:
+        from PIL import Image
+        import io
+        w, h = Image.open(io.BytesIO(jpg)).size
+    except Exception:
+        return None
+    return [0.5, 0.35] if h > w else [0.5, 0.45]
 
 
 def caption(a, bucket, today):
@@ -235,7 +265,12 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
             log("immich:", error)
 
     os.makedirs(photos_dir, exist_ok=True)
-    keep, captions, added, broken, not_ready = [], [], 0, 0, 0
+    focus_file = os.path.join(data_dir, "immich_focus.json")
+    try:
+        focus = json.load(open(focus_file))
+    except (OSError, ValueError):
+        focus = {}
+    keep, captions, focal, added, broken, not_ready = [], [], [], 0, 0, 0
     for x in pick.get("items") or []:
         name = f"im_{x['id']}.jpg"
         path = os.path.join(photos_dir, name)
@@ -249,6 +284,7 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
                     f.write(jpg)
                 os.replace(path + ".tmp", path)
                 added += 1
+                focus[x["id"]] = focal_point(api, x["id"], jpg)
             except urllib.error.HTTPError as e:
                 if e.code == 404:                     # no preview in Immich yet: skip it today, quietly
                     _not_ready.add(x["id"])
@@ -265,11 +301,22 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
                 continue
         keep.append("photos/" + name)
         captions.append((x.get("caption") or "") if im.get("captions", True) else "")
+        if x["id"] not in focus:                      # photos cached before focal points existed
+            try:
+                focus[x["id"]] = focal_point(apis.get(x["who"]), x["id"], open(path, "rb").read())
+            except Exception:
+                focus[x["id"]] = None
+        focal.append(focus.get(x["id"]))
     if pick.get("items"):
         wanted = {os.path.basename(k) for k in keep}
         for f in os.listdir(photos_dir):
             if f.endswith(".jpg") and f not in wanted and (f.startswith("im_") or keep):
                 os.remove(os.path.join(photos_dir, f))
+        ids = {x["id"] for x in pick["items"]}
+        focus = {k: v for k, v in focus.items() if k in ids}
+    with open(focus_file + ".tmp", "w") as f:
+        json.dump(focus, f)
+    os.replace(focus_file + ".tmp", focus_file)
     if not_ready:
         log(f"immich: {not_ready} photos skipped today (Immich has no preview for them yet)")
     # The screen only shows a problem the family would notice: no photos, or a set that's
@@ -279,7 +326,7 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
         error = None
     if not keep and not error:
         error = "Immich: no photos available yet"
-    write_json("photos.json", {"photos": keep, "captions": captions, "seconds": seconds,
+    write_json("photos.json", {"photos": keep, "captions": captions, "focus": focal, "seconds": seconds,
                                 "source": "immich", "error": error, "detail": detail})
     if added:
         log(f"photos: {len(keep)} from Immich ({added} new)")
