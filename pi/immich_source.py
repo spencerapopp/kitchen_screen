@@ -10,6 +10,10 @@ listed in config.json, then keeps screen-sized copies in ~/kitchen-data/photos/:
   people        photos with named faces (Explore > People in Immich)
   every year    the rest, spread evenly across the years
 
+Only photos with people in them are picked automatically (set "people_only": false to allow
+any photo); the Kitchen Screen album and favorites are shown as they are. Put a photo in an
+album called "Hide from Kitchen" to keep it off the screen for good.
+
 Skipped: videos, archived/hidden/locked photos, screenshots and other phone-shaped
 images, tiny images, and the same photo appearing in two accounts.
 
@@ -43,12 +47,14 @@ BASE = {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}}
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 _retry = {"at": 0, "error": None}
 _not_ready = set()                                # asset ids with no Immich preview yet (cleared each new pick)
+PICK_RULES = 2
 _faces_off = set()                                # accounts whose key lacks face.read
 
 
 class Immich:
     def __init__(self, url, key, who, timeout=30):
         self.url, self.key, self.who, self.timeout = url.rstrip("/"), key, who, timeout
+        self.extra = {}                              # filters added to every search (e.g. the hide album)
 
     def call(self, method, path, body=None, raw=False):
         data = json.dumps(body).encode() if body is not None else None
@@ -60,10 +66,12 @@ class Immich:
         return out if raw else json.loads(out or b"null")
 
     def random(self, size, **flt):
-        return self.call("POST", "/search/random", {"filter": {**BASE, **flt}, "size": size, "withExif": True}) or []
+        return self.call("POST", "/search/random", {"filter": {**BASE, **self.extra, **flt}, "size": size,
+                                                     "withExif": True}) or []
 
     def search(self, size, **flt):
-        r = self.call("POST", "/search/metadata", {"filter": {**BASE, **flt}, "size": size, "withExif": True})
+        r = self.call("POST", "/search/metadata", {"filter": {**BASE, **self.extra, **flt}, "size": size,
+                                                    "withExif": True})
         return ((r or {}).get("assets") or {}).get("items") or []
 
     def thumbnail(self, asset_id):
@@ -142,24 +150,36 @@ def caption(a, bucket, today):
 
 
 def gather(api, cfg, today, log):
-    """Candidate photos from one account, grouped by why they'd be shown."""
-    out = {k: [] for k in ("pinned", "on this day", "recent", "favorites", "people", "years")}
+    """Candidate photos from one account, grouped by why they'd be shown.
+
+    Only photos with people in them are picked automatically ("people_only", on by default),
+    so DIY shots of light fixtures, wiring, receipts and the like stay off the screen. The
+    "Kitchen Screen" album and favorites are trusted as they are. Anything in an album called
+    "Hide from Kitchen" never shows."""
+    out = {k: [] for k in ("pinned", "on this day", "recent", "favorites", "people", "years", "backup")}
     album = (cfg.get("album") or "Kitchen Screen").strip().lower()
+    hide = (cfg.get("hide_album") or "Hide from Kitchen").strip().lower()
     try:
-        ids = [x["id"] for x in api.call("GET", "/albums") or [] if (x.get("albumName") or "").strip().lower() == album]
+        albums = api.call("GET", "/albums") or []
+        name = lambda x: (x.get("albumName") or "").strip().lower()
+        hide_ids = [x["id"] for x in albums if name(x) == hide]
+        if hide_ids:
+            api.extra = {"albumIds": {"none": hide_ids}}
+        ids = [x["id"] for x in albums if name(x) == album]
         if ids:
             out["pinned"] = api.search(1000, albumIds={"any": ids})
     except urllib.error.HTTPError as e:
         log(f"immich {api.who}: albums skipped ({e.code})")
+    with_people = {"hasPeople": {"eq": True}} if cfg.get("people_only", True) else {}
     for y in range(FIRST_YEAR, today.year):
         try:
             day = today.replace(year=y)
         except ValueError:                          # Feb 29 in a non-leap year
             day = date(y, 2, 28)
         out["on this day"] += api.random(6, takenAt={"gte": iso(day - timedelta(days=2)),
-                                                     "lt": iso(day + timedelta(days=3))})
+                                                     "lt": iso(day + timedelta(days=3))}, **with_people)
     days = int(cfg.get("recent_days", 60))
-    out["recent"] = api.random(150, takenAt={"gte": iso(today - timedelta(days=days))})
+    out["recent"] = api.random(150, takenAt={"gte": iso(today - timedelta(days=days))}, **with_people)
     out["favorites"] = api.random(200, isFavorite={"eq": True})
     try:
         want = {n.strip().lower() for n in cfg.get("people") or []}
@@ -171,7 +191,10 @@ def gather(api, cfg, today, log):
     except urllib.error.HTTPError as e:
         log(f"immich {api.who}: people skipped ({e.code})")
     for y in range(FIRST_YEAR, today.year + 1):
-        out["years"] += api.random(25, takenAt={"gte": iso(date(y, 1, 1)), "lt": iso(date(y + 1, 1, 1))})
+        out["years"] += api.random(25, takenAt={"gte": iso(date(y, 1, 1)), "lt": iso(date(y + 1, 1, 1))}, **with_people)
+    if with_people and sum(len(v) for k, v in out.items() if k != "pinned") < 300:
+        # Face detection hasn't covered the library yet: keep the screen full with any photos.
+        out["backup"] = api.random(400)
     return out
 
 
@@ -212,6 +235,13 @@ def choose(pools, count, today, rng=random):
             if by_year[y] and len(picked) < count:
                 who, a = by_year[y].pop()
                 take(a, who, "years")
+    floor = min(count, 200)                          # only when people-photos run short
+    backup = [(who, a) for who, p in pools for a in p.get("backup") or []]
+    rng.shuffle(backup)
+    for who, a in backup:
+        if len(picked) >= floor:
+            break
+        take(a, who, "backup")
     rng.shuffle(picked)
     return picked
 
@@ -229,7 +259,8 @@ def update(cfg, *, data_dir, photos_dir, write_json, to_jpeg, log, now=None):
         return
     today = (now or datetime.now()).date()
     pick_file = os.path.join(data_dir, "immich_pick.json")
-    sig = json.dumps({k: v for k, v in im.items() if k != "keys"}, sort_keys=True) + "|" + ",".join(sorted(apis))
+    sig = json.dumps({k: v for k, v in im.items() if k != "keys"}, sort_keys=True) + "|" + ",".join(sorted(apis)) \
+        + f"|v{PICK_RULES}"                          # new pick rules take effect the moment the code updates
     try:
         pick = json.load(open(pick_file))
     except (OSError, ValueError):
