@@ -8,9 +8,10 @@ listed in config.json, then keeps screen-sized copies in ~/kitchen-data/photos/:
   recent        the last couple of months
   favorites     hearted photos
   people        photos with named faces (Explore > People in Immich)
+  pets          dogs and cats, found by Immich's smart search
   every year    the rest, spread evenly across the years
 
-Only photos with people in them are picked automatically (set "people_only": false to allow
+Only photos with people or pets in them are picked automatically (set "people_only": false to allow
 any photo); the Kitchen Screen album and favorites are shown as they are. Put a photo in an
 album called "Hide from Kitchen" to keep it off the screen for good.
 
@@ -47,7 +48,7 @@ BASE = {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}}
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 _retry = {"at": 0, "error": None}
 _not_ready = set()                                # asset ids with no Immich preview yet (cleared each new pick)
-PICK_RULES = 2
+PICK_RULES = 3
 _faces_off = set()                                # accounts whose key lacks face.read
 
 
@@ -72,6 +73,12 @@ class Immich:
     def search(self, size, **flt):
         r = self.call("POST", "/search/metadata", {"filter": {**BASE, **self.extra, **flt}, "size": size,
                                                     "withExif": True})
+        return ((r or {}).get("assets") or {}).get("items") or []
+
+    def smart(self, query, size, **flt):
+        """Immich's smart (CLIP) search: best matches first. Needs the Smart Search job to have run."""
+        r = self.call("POST", "/search/smart", {"query": query, "filter": {**BASE, **self.extra, **flt},
+                                                 "size": size, "withExif": True})
         return ((r or {}).get("assets") or {}).get("items") or []
 
     def thumbnail(self, asset_id):
@@ -156,7 +163,7 @@ def gather(api, cfg, today, log):
     so DIY shots of light fixtures, wiring, receipts and the like stay off the screen. The
     "Kitchen Screen" album and favorites are trusted as they are. Anything in an album called
     "Hide from Kitchen" never shows."""
-    out = {k: [] for k in ("pinned", "on this day", "recent", "favorites", "people", "years", "backup")}
+    out = {k: [] for k in ("pinned", "on this day", "recent", "favorites", "people", "pets", "years", "backup")}
     album = (cfg.get("album") or "Kitchen Screen").strip().lower()
     hide = (cfg.get("hide_album") or "Hide from Kitchen").strip().lower()
     try:
@@ -167,7 +174,7 @@ def gather(api, cfg, today, log):
             api.extra = {"albumIds": {"none": hide_ids}}
         ids = [x["id"] for x in albums if name(x) == album]
         if ids:
-            out["pinned"] = api.search(1000, albumIds={"any": ids})
+            out["pinned"] = api.search(1000, albumIds={"any": ids, **({"none": hide_ids} if hide_ids else {})})
     except urllib.error.HTTPError as e:
         log(f"immich {api.who}: albums skipped ({e.code})")
     with_people = {"hasPeople": {"eq": True}} if cfg.get("people_only", True) else {}
@@ -190,6 +197,13 @@ def gather(api, cfg, today, log):
             out["people"] = api.random(250, personIds={"any": pids[:100]})
     except urllib.error.HTTPError as e:
         log(f"immich {api.who}: people skipped ({e.code})")
+    # Pets: Immich only recognizes human faces, so dogs and cats come from its smart search.
+    for q in cfg.get("pets_search") or ["a photo of a dog", "a photo of a cat"]:
+        try:
+            out["pets"] += api.smart(q, 150)
+        except urllib.error.HTTPError as e:
+            log(f"immich {api.who}: pet search skipped ({e.code}; Smart Search job may not have run)")
+            break
     for y in range(FIRST_YEAR, today.year + 1):
         out["years"] += api.random(25, takenAt={"gte": iso(date(y, 1, 1)), "lt": iso(date(y + 1, 1, 1))}, **with_people)
     if with_people and sum(len(v) for k, v in out.items() if k != "pinned") < 300:
@@ -201,7 +215,7 @@ def gather(api, cfg, today, log):
 def choose(pools, count, today, rng=random):
     """pools: [(who, {bucket: [assets]})]. Returns [{id, who, caption}] of about `count` photos."""
     quota = {"pinned": 150, "on this day": int(count * .12), "recent": int(count * .2),
-             "favorites": int(count * .2), "people": int(count * .24)}
+             "favorites": int(count * .18), "people": int(count * .22), "pets": int(count * .12)}
     picked, seen = [], set()
 
     def take(a, who, bucket):
