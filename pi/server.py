@@ -96,6 +96,11 @@ def is_leave(cfg, title):
     return "#leave" in t or any(x.lower() == t.strip() for x in cfg.get("leave_titles") or [])
 
 
+def is_note(title):
+    """"#note" events are reminders: shown in the banner spot during the event, never on the grid."""
+    return "#note" in title.lower()
+
+
 # Google Calendar's event colours (colorId -> hex), as shown in the Calendar app.
 EVENT_COLORS = {"1": "#7986CB", "2": "#33B679", "3": "#8E24AA", "4": "#E67C73", "5": "#F6BF26", "6": "#F4511E",
                 "7": "#039BE5", "8": "#616161", "9": "#3F51B5", "10": "#0B8043", "11": "#D50000"}
@@ -132,14 +137,15 @@ def calendar_from_api(cfg):
                 if ev.get("status") == "cancelled":
                     continue
                 title = (ev.get("summary") or "(busy)").strip()
-                if c in leave_only and not is_leave(cfg, title):
+                if c in leave_only and not (is_leave(cfg, title) or is_note(title)):
                     continue
                 st, en = ev.get("start", {}), ev.get("end", {})
                 # The event's own colour, else None (the screen uses its default look).
                 color = EVENT_COLORS.get(str(ev.get("colorId", ""))) or keyword_color(cfg, title)
                 if "dateTime" in st:
                     s = datetime.fromisoformat(st["dateTime"]).astimezone(TZ)
-                    out.append({"title": title, "start": s.isoformat(), "allDay": False,
+                    e = datetime.fromisoformat(en.get("dateTime") or st["dateTime"]).astimezone(TZ)
+                    out.append({"title": title, "start": s.isoformat(), "end": e.isoformat(), "allDay": False,
                                 "location": (ev.get("location") or "").strip(), "color": color,
                                 "free": ev.get("transparency") == "transparent"})
                 elif "date" in st:
@@ -221,7 +227,9 @@ def calendar_from_ical(cfg):
                 e = ev.get("DTEND").dt if ev.get("DTEND") else None
                 if isinstance(s, datetime):
                     s = s.astimezone(TZ) if s.tzinfo else s.replace(tzinfo=TZ)
-                    out.append({"title": title, "start": s.isoformat(), "allDay": False,
+                    e = e if isinstance(e, datetime) else s
+                    e = e.astimezone(TZ) if e.tzinfo else e.replace(tzinfo=TZ)
+                    out.append({"title": title, "start": s.isoformat(), "end": e.isoformat(), "allDay": False,
                                 "location": str(ev.get("LOCATION", "") or "").strip(),
                                 "color": keyword_color(cfg, title)})
                 else:
@@ -251,6 +259,9 @@ def update_calendar(cfg):
         if is_leave(cfg, ev["title"]):
             ev["hidden"] = True
             ev["title"] = " ".join(w for w in ev["title"].split() if w.lower() != "#leave")
+        if is_note(ev["title"]):
+            ev["hidden"] = ev["note"] = True
+            ev["title"] = " ".join(w for w in ev["title"].split() if w.lower() != "#note")
     # Same event on two calendars (e.g. shared family events) → show once.
     seen, unique = set(), []
     for ev in sorted(out, key=lambda x: x["start"]):
@@ -699,7 +710,19 @@ def update_note(cfg):
     pat = re.compile(cfg.get("note_pattern", NOTE_TITLE), re.I)
     a, b = (cfg.get("note_hours") or ["16:00", "20:00"])[:2]
     note = None
-    if a <= now.strftime("%H:%M") < b:
+    # "#note" reminders: a timed event shows from its start to its end; an all-day one, all day.
+    for ev in _events:
+        if not ev.get("note"):
+            continue
+        if ev.get("allDay"):
+            on = ev["start"][:10] <= now.date().isoformat() < (ev.get("end") or ev["start"])[:10]
+        else:
+            on = datetime.fromisoformat(ev["start"]) <= now < datetime.fromisoformat(ev.get("end") or ev["start"])
+        if on:
+            note = {"show": True, "label": "Reminder", "text": ev["title"], "icon": "bell",
+                    "date": now.date().isoformat()}
+            break
+    if not note and a <= now.strftime("%H:%M") < b:
         today = now.date()
         for ev in _events:
             if not ev.get("allDay") or not pat.search(ev["title"]):
