@@ -72,8 +72,38 @@ def write_json(name, obj):
 
 def http(url, data=None, headers=None, timeout=30):
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "kitchen-screen", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read()
+    except Exception as e:
+        if is_offline(e):
+            net_down()
+        raise
+    _net["down_since"] = None
+    return body
+
+
+# ── internet check: one plain message instead of raw "urlopen error" text ──
+_net = {"down_since": None}
+_OFFLINE = ("name resolution", "Name or service not known", "Network is unreachable", "No route to host",
+            "NameResolutionError", "Failed to resolve", "getaddrinfo failed", "Errno -3", "Errno -2", "Errno 101")
+
+
+def is_offline(e):
+    """True when the request failed because this machine has no internet (DNS or network down)."""
+    return any(w in f"{type(e).__name__}: {e} {getattr(e, 'reason', '')}" for w in _OFFLINE)
+
+
+def net_down():
+    if not _net["down_since"]:
+        _net["down_since"] = datetime.now(TZ)
+        log("internet: DNS/network down")
+
+
+def net_msg():
+    """Same text from every job, so the status line shows it once."""
+    t = _net["down_since"] or datetime.now(TZ)
+    return "No internet since " + t.strftime("%-I:%M %p") + " (list, weather and traffic may be out of date)"
 
 
 # ── calendar ────────────────────────────────────────────────────────────────
@@ -1045,9 +1075,15 @@ def update_commute(cfg):
     if not home_q:
         write_json("commute.json", {"show": False, "error": "no home_address in config"})
         return
-    home = geocode(cfg, home_q)
+    try:
+        home = geocode(cfg, home_q)
+    except Exception as e:
+        home = None
+        if not is_offline(e):
+            raise
     if not home:
-        write_json("commute.json", {"show": False, "error": "home address not found by the map service"})
+        write_json("commute.json", {"show": False, "error": net_msg() if _net["down_since"]
+                                    else "home address not found by the map service"})
         return
     off = no_school_days()
     today = now.date().isoformat()
@@ -1070,7 +1106,7 @@ def update_commute(cfg):
             _, mins, is_live, free = _commute[k]
             row.update(minutes=mins, typical=free, delay=max(0, mins - free), live=is_live)
         except Exception as e:
-            err = str(e)[:120]
+            err = net_msg() if is_offline(e) else str(e)[:120]
         out.append(row)
     mt = cfg.get("morning_trip") or []
     trips = []
@@ -1080,8 +1116,10 @@ def update_commute(cfg):
             if p:
                 trips.append(p)
         except Exception as e:
-            err = str(e)[:120]
+            err = net_msg() if is_offline(e) else str(e)[:120]
     live = live and not _tomtom["error"]
+    if _net["down_since"] and not trips and not any("minutes" in r for r in out):
+        err = net_msg()                    # offline: say so instead of a TomTom/geocode error
     write_json("commute.json", {"show": bool(out or trips), "live": live, "updated": now.isoformat(timespec="minutes"),
                                 "trips": trips, "routes": out, "error": err or _tomtom["error"]})
 
@@ -1225,8 +1263,14 @@ def update_keep(cfg):
             except Exception:
                 pass
             bad_token = any(w in why for w in ("BadAuthentication", "NeedsBrowser", "LoginException"))
-            write_json("tasks.json", {**old, "error": "Google Keep sign-in expired: run pi/keep_auth.py"
-                                      if bad_token else "Google Keep not syncing (list may be out of date)"})
+            if is_offline(e):
+                net_down()
+                msg = net_msg()
+            elif bad_token:
+                msg = "Google Keep sign-in expired: run pi/keep_auth.py"
+            else:
+                msg = "Google Keep not syncing (list may be out of date)"
+            write_json("tasks.json", {**old, "error": msg})
         return
     want = k.get("family_list") or "Family List"
     fam = ks.find_note(keep, want)

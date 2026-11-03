@@ -23,6 +23,16 @@
   /* clock */
   #clock{left:48px;top:32px;width:576px;height:108px;}
   #time{font-size:84px;font-weight:200;line-height:1;letter-spacing:-.01em;}
+  #trow{display:flex;align-items:center;gap:30px;}
+  /* small countdown beside the clock while the banner is busy (morning traffic, alerts, leave-by) */
+  #mini{display:none;align-items:center;gap:12px;min-width:0;max-width:200px;height:60px;padding-left:28px;
+        border-left:1px solid var(--panel-line);margin-top:6px;}
+  #mini.show{display:flex;}
+  #mini svg{flex:0 0 30px;height:30px;color:var(--ic,var(--bay));}
+  #mini .txt{min-width:0;}
+  #mini .lbl{color:var(--muted);font-size:13px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #mini .big{font-size:27px;font-weight:300;line-height:1.15;white-space:nowrap;}
+  #mini .big b{font-weight:400;color:var(--ic,var(--bay));}
   #date{margin-top:10px;color:var(--bay);text-transform:uppercase;letter-spacing:.16em;font-size:21px;}
 
   /* weather */
@@ -195,7 +205,7 @@
 </head>
 <body>
 <div id="stage">
-  <div class="block" id="clock"><div id="time"></div><div id="date"></div></div>
+  <div class="block" id="clock"><div id="trow"><div id="time"></div><div id="mini"></div></div><div id="date"></div></div>
   <div class="block" id="banner"></div>
   <div class="block" id="weather"><div id="wtop"><div id="wnow"><div id="wmain"></div></div><div id="wdays"></div></div><div id="air"></div></div>
   <div class="block panel" id="cal"></div>
@@ -521,7 +531,7 @@ function nextPhoto() {
 
 // ── small, quiet status line (only shows if something is wrong) ──
 const problems = {};
-function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]; document.getElementById("status").textContent = Object.values(problems).join(" · "); }
+function setStatus(k, msg) { if (msg) problems[k] = msg; else delete problems[k]; document.getElementById("status").textContent = [...new Set(Object.values(problems))].join(" · "); }
 
 // ── banner: severe weather, else "leave by" ──
 const CAR = '<svg viewBox="0 0 24 24"><path d="M5 16V11.5l1.7-4.3A2 2 0 0 1 8.6 6h6.8a2 2 0 0 1 1.9 1.2L19 11.5V16M5 16h14M5 16v2M19 16v2M5 11.5h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="13.8" r="1" fill="currentColor"/><circle cx="16" cy="13.8" r="1" fill="currentColor"/></svg>';
@@ -579,6 +589,7 @@ function renderCountdown(b) {
     big = count.today ? `<b>${esc(count.today)}</b>` : count.kind === "trip" ? `<b>${esc(count.label)}</b>` : `Happy <b>${esc(count.label)}</b>!`;
   } else if (count.days === 1) big = "<b>Tomorrow!</b>";
   else big = `<b>${count.days}</b> days to go`;
+  countInBanner = true;
   b.className = "block show count";
   b.style.setProperty("--ic", color);
   b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>` +
@@ -587,7 +598,25 @@ function renderCountdown(b) {
   for (let fs = 34; fs > 20 && el.scrollWidth > el.clientWidth; fs--) el.style.fontSize = fs + "px";
 }
 
+let countInBanner = false;
 function renderBanner() {
+  countInBanner = false;
+  renderBannerMain();
+  renderMini();
+}
+// The countdown lives in the banner when it's free; when the banner is busy (traffic,
+// weather alert, leave-by, a #note), it moves to a small spot beside the clock instead.
+function renderMini() {
+  const m = document.getElementById("mini");
+  if (countInBanner || !count.show || count.date !== ymd(new Date())) { m.className = ""; m.innerHTML = ""; return; }
+  const [color, paths] = COUNT_ICON[count.icon] || COUNT_ICON.star;
+  const big = count.days === 0 ? "<b>Today</b>" : count.days === 1 ? "<b>Tomorrow</b>" : `<b>${count.days}</b> days`;
+  m.className = "show";
+  m.style.setProperty("--ic", color);
+  m.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${paths}</svg>` +
+    `<div class="txt"><div class="lbl">${esc(count.label)}</div><div class="big">${big}</div></div>`;
+}
+function renderBannerMain() {
   const b = document.getElementById("banner");
   const a = alerts[0];
   if (a) {
