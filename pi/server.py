@@ -829,7 +829,24 @@ def expand_abbrev(q):
     return re.sub(r"\b([A-Za-z]+)\.?(?=[ ,]|$)", lambda m: ABBREV.get(m.group(1).lower(), m.group(1)), q)
 
 
+UNIT = re.compile(r",?\s*(?:#\s*\w+|\b(?:ste|suite|unit|apt|bldg|building|room|floor)\b\.?\s*#?\s*\w+)", re.I)
+
+
+def clean_address(q):
+    """'6124 W Parker Rd Ste 330, Bldg 3, Plano, TX 75093' -> '6124 W Parker Rd, Plano, TX 75093'.
+    Suite/building numbers confuse geocoders into matching a different spot on the street."""
+    q = UNIT.sub("", q)
+    return re.sub(r"\s*,\s*(?=,)|^\s*,\s*", "", re.sub(r"\s{2,}", " ", q)).strip(" ,")
+
+
+def zip_of(text):
+    m = re.search(r"\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)", text or "")
+    return m.group(1) if m else None
+
+
 def geocode(cfg, q):
+    q = clean_address(q)
+    want_zip = zip_of(q) if re.match(r"\s*\d+\s", q) else None   # street address with a ZIP: results must match it
     if _geo.get(q):
         return _geo[q]
     cache = os.path.join(DATA, "geocache.json")
@@ -843,20 +860,24 @@ def geocode(cfg, q):
     if key:
         try:
             r = json.loads(http(f"https://api.tomtom.com/search/2/search/{urllib.parse.quote(q)}.json"
-                                f"?key={key}&lat={lat}&lon={lng}&radius=80000&limit=1"))
-            if r.get("results"):
-                p = r["results"][0]["position"]
+                                f"?key={key}&lat={lat}&lon={lng}&radius=80000&limit=5"))
+            for res in r.get("results") or []:
+                if want_zip and (res.get("address") or {}).get("postalCode", "")[:5] != want_zip:
+                    continue                                      # wrong part of town: skip it
+                p = res["position"]
                 pt = [p["lat"], p["lon"]]
+                break
             _tomtom["error"] = None
         except Exception as e:
             _tomtom["error"] = tomtom_problem(e)
     if pt is None:
         box = f"{lng-0.8},{lat+0.6},{lng+0.8},{lat-0.6}"          # bias to DFW
         for query in dict.fromkeys([q, expand_abbrev(q)]):          # "6412 Allegheny Trl" -> "... Trail"
-            r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us"
+            r = json.loads(http("https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=us"
                                 "&viewbox=" + box + "&q=" + urllib.parse.quote(query),
                                 headers={"User-Agent": "kitchen-screen (family dashboard)"}))
             time.sleep(1.1)                                       # Nominatim: max 1 request/second
+            r = [x for x in r if not want_zip or want_zip in x.get("display_name", "")]
             if r:
                 pt = [float(r[0]["lat"]), float(r[0]["lon"])]
                 break
@@ -967,7 +988,8 @@ def update_leave(cfg):
         if (start.date().isoformat() in off_days and
                 re.search(r"school|pre-?k|preschool|drop.?off|pick.?up", ev["title"] + " " + loc, re.I)):
             continue                                   # no drop-off on no-school days
-        early = int((cfg.get("arrive_early") or {}).get(ev["title"], 0))
+        # Arrive a few minutes before the start (default 5; per-title overrides in "arrive_early").
+        early = int((cfg.get("arrive_early") or {}).get(ev["title"], cfg.get("arrive_early_min", 5)))
         arrive = start - timedelta(minutes=early)
         places = {k.lower(): v for k, v in (cfg.get("places") or {}).items()}
         dest = geocode(cfg, places.get(loc.lower(), loc))
