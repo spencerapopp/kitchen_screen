@@ -47,7 +47,9 @@ def main():
     add(OK if t.endswith("=0x0") else BAD, "power", t or "n/a")
     add(MEH, "temperature", sh("vcgencmd measure_temp 2>/dev/null"))
     nw = sh("systemctl is-active kitchen-netwatch.timer")
-    last = sh("journalctl -t kitchen-netwatch -n 1 --no-pager -o short 2>/dev/null | tail -1 | cut -c1-15,40-")
+    when = sh("journalctl -t kitchen-netwatch -n 1 --no-pager -o short 2>/dev/null | grep -v '^--' | tail -1 | cut -c1-12")
+    msg = sh("journalctl -t kitchen-netwatch -n 1 --no-pager -o cat 2>/dev/null | grep -v '^--' | tail -1")
+    last = f"{when} {msg}" if msg else ""
     add(OK if nw == "active" else BAD, "network watchdog",
         ("on" + (f" | last: {last}" if last and "No entries" not in last else " | no drops so far"))
         if nw == "active" else "off: sudo bash pi/netwatch_setup.sh")
