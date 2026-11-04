@@ -32,9 +32,26 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.expanduser("~/kitchen-data")
+# On the Pi these live in the home folder. On mrpopp (a Windows service) they're set by
+# the service: KITCHEN_DATA=D:\poppboard\kitchen-data, KITCHEN_CONFIG=D:\poppboard\config\config.json
+DATA = os.environ.get("KITCHEN_DATA") or os.path.expanduser("~/kitchen-data")
 PHOTOS = os.path.join(DATA, "photos")
-CONFIG = os.path.expanduser("~/.config/kitchen/config.json")
+CONFIG = os.environ.get("KITCHEN_CONFIG") or os.path.expanduser("~/.config/kitchen/config.json")
+
+if os.name == "nt":
+    # Windows won't replace a file another thread has open (the web server reading a data file
+    # at that instant). Retry briefly instead of failing the update.
+    _os_replace = os.replace
+
+    def _replace_retry(src, dst):
+        for _ in range(40):
+            try:
+                return _os_replace(src, dst)
+            except PermissionError:
+                time.sleep(0.05)
+        return _os_replace(src, dst)
+
+    os.replace = _replace_retry
 TZ = ZoneInfo("America/Chicago")
 PORT = 8080
 WEEKS = 5
@@ -103,7 +120,7 @@ def net_down():
 def net_msg():
     """Same text from every job, so the status line shows it once."""
     t = _net["down_since"] or datetime.now(TZ)
-    return "No internet since " + t.strftime("%-I:%M %p") + " (list, weather and traffic may be out of date)"
+    return "No internet since " + t.strftime("%I:%M %p").lstrip("0") + " (list, weather and traffic may be out of date)"
 
 
 # ── calendar ────────────────────────────────────────────────────────────────
