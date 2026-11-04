@@ -46,6 +46,11 @@ def main():
     t = sh("vcgencmd get_throttled 2>/dev/null")
     add(OK if t.endswith("=0x0") else BAD, "power", t or "n/a")
     add(MEH, "temperature", sh("vcgencmd measure_temp 2>/dev/null"))
+    nw = sh("systemctl is-active kitchen-netwatch.timer")
+    last = sh("journalctl -t kitchen-netwatch -n 1 --no-pager -o short 2>/dev/null | tail -1 | cut -c1-15,40-")
+    add(OK if nw == "active" else BAD, "network watchdog",
+        ("on" + (f" | last: {last}" if last and "No entries" not in last else " | no drops so far"))
+        if nw == "active" else "off: sudo bash pi/netwatch_setup.sh")
     add(OK if os.path.exists(os.path.join(HOME, ".local/share/icons/kitchen-blank")) else BAD, "hidden pointer",
         "installed" if os.path.exists(os.path.join(HOME, ".local/share/icons/kitchen-blank")) else "run pi/hide_cursor.py")
 
